@@ -92,7 +92,7 @@ New here? Read the [pstack guide](./docs/guide/README.md) or ask [`/poteto-help`
 
 </details>
 
-### 32 Workflow Skills + 24 Principle Skills
+### 33 Workflow Skills + 24 Principle Skills
 
 <details>
 <summary>All workflow skills</summary>
@@ -104,6 +104,7 @@ New here? Read the [pstack guide](./docs/guide/README.md) or ask [`/poteto-help`
 | [`/setup-pstack`](./skills/setup-pstack/SKILL.md) | Configure Antigravity subagent tiers and `/swarm` panel models in `~/.gemini/config/rules/pstack-models.md`. |
 | [`/in-your-own-words`](./skills/in-your-own-words/SKILL.md) | Play back your goal and problem before starting work. |
 | [`/sharpen`](./skills/sharpen/SKILL.md) | Rewrite a prompt deeper (not bigger) before sending it. |
+| [`/reframe`](./skills/reframe/SKILL.md) | Learn the expert words for what you're building, disambiguate vague descriptions, borrow terms from neighboring fields with verified links, and rewrite your description (pairs well with `/sharpen`). |
 | [`/how`](./skills/how/SKILL.md) | Architecture walkthrough of how a subsystem works (via read-only `research` subagent). |
 | [`/why`](./skills/why/SKILL.md) | Historical motivation from git commits, PRs, and records. |
 | [`/teach`](./skills/teach/SKILL.md) | Plain diagram-by-diagram explanation combining `/how` + `/why`. |

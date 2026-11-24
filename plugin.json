@@ -1,7 +1,7 @@
 {
   "name": "pstack",
   "displayName": "pstack",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "If you want to go fast, go deep first. Rigorous engineering workflows, playbooks, principles, arenas, and adversarial reviews built natively for Antigravity.",
   "author": {
     "name": "Lauren Tan (adapted for Antigravity)"

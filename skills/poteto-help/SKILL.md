@@ -56,6 +56,7 @@ The default answer is `/poteto-mode`, which runs most of the others when its ste
 | Do any non-trivial task with rigor | [`/poteto-mode`](../poteto-mode/SKILL.md) |
 | Check that the agent understood their goal and problem first | [`/in-your-own-words`](../in-your-own-words/SKILL.md) |
 | Rewrite a prompt deeper before sending it (doesn't run the task) | [`/sharpen`](../sharpen/SKILL.md) |
+| Learn the expert words for what they're building (borrowing from neighboring fields, checking cited links) and rewrite their description | [`/reframe`](../reframe/SKILL.md) |
 | Know how code works now, or where new code should live | [`/how`](../how/SKILL.md) |
 | Know why code is shaped this way, or where a number came from | [`/why`](../why/SKILL.md) |
 | Understand a change or subsystem, explained plainly | [`/teach`](../teach/SKILL.md) |
