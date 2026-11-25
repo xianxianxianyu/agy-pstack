@@ -23,6 +23,7 @@ Rather than wrapping Cursor instructions in a compatibility shim, every workflow
 | Conversation history, recall & eval verification | Native transcripts (`~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl`) & `conversation://` links |
 | Capturing learnings & managing context | `/reflect` + `/correct` paired with native **`/learn`** and **`/compact`** |
 | Model & tier configuration | `/setup-pstack` → `~/.gemini/config/rules/pstack-models.md` (`inherit` / `pro` / `flash` / `flash_lite` + live `swarm{action:"models"}`) |
+| Visual Playbook & Skill Composer UI | **`pstack Studio`** Aux Pane sidecar (`sidecars/studio/`): interactive intent matcher, 22-playbook pipeline visualizer, close-call comparisons, and one-click dispatch to chat |
 | Scripts & PR watcher | **Bun**-native (`watch-pr`, `statechart`, `worktree-audit.sh`) |
 
 ## Install
@@ -56,7 +57,7 @@ Antigravity discovers the plugin automatically — no restart required. Manage, 
 /goal /poteto-mode i'm going to bed. land the stack even if ci flakes. i want everything merged by morning.
 ```
 
-New here? Read the [pstack guide](./docs/guide/README.md) or ask [`/poteto-help`](./skills/poteto-help/SKILL.md).
+New here? Open **`pstack Studio`** in the Auxiliary Side Pane (`sidecars/studio/`) to browse visual Playbook pipelines, compare close-call skills, and send assembled combos directly into your active conversation — or read the [pstack guide](./docs/guide/README.md) and ask [`/poteto-help`](./skills/poteto-help/SKILL.md).
 
 ## What's inside
 
