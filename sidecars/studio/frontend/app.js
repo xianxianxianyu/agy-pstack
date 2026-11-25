@@ -45,6 +45,48 @@ const LAUNCH_MODES = [
   },
 ];
 
+const FONT_OPTIONS = [
+  {
+    id: 'system',
+    name: '系统默认',
+    sample: '简洁清晰 Aa',
+    previewStyle: '-apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", sans-serif',
+  },
+  {
+    id: 'sans-cn',
+    name: '现代无衬线',
+    sample: '工程文档 Aa',
+    previewStyle: '"Inter", "Noto Sans SC", "PingFang SC", sans-serif',
+  },
+  {
+    id: 'mono',
+    name: '等宽工程风',
+    sample: 'Code / 01',
+    previewStyle: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace',
+  },
+  {
+    id: 'serif',
+    name: '人文衬线',
+    sample: '深度阅读 Aa',
+    previewStyle: '"Noto Serif SC", "Songti SC", Georgia, serif',
+  },
+];
+
+const FONT_SIZE_OPTIONS = [
+  { size: 12, label: '12px 紧凑' },
+  { size: 13, label: '13px 偏小' },
+  { size: 14, label: '14px 标准' },
+  { size: 15, label: '15px 偏大' },
+  { size: 16, label: '16px 宽松' },
+];
+
+const SETTINGS_TABS = [
+  { id: 'general', title: '通用', sub: 'General' },
+  { id: 'playbooks', title: '流程', sub: 'Playbooks' },
+  { id: 'skills', title: '技能', sub: 'Skills' },
+  { id: 'principles', title: '原则', sub: 'Principles' },
+];
+
 function loadSavedLaunchMode() {
   try {
     const saved = window.localStorage?.getItem('pstack_studio_launch_mode');
@@ -55,16 +97,84 @@ function loadSavedLaunchMode() {
   return 'send-current';
 }
 
+function loadLocalUiPrefs() {
+  try {
+    const raw = window.localStorage?.getItem('pstack_studio_ui_prefs');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        themeMode: ['auto', 'light', 'dark'].includes(parsed.themeMode) ? parsed.themeMode : 'auto',
+        fontFamily: FONT_OPTIONS.some((f) => f.id === parsed.fontFamily) ? parsed.fontFamily : 'system',
+        fontSize: Number.isFinite(Number(parsed.fontSize))
+          ? Math.max(12, Math.min(16, Math.round(Number(parsed.fontSize))))
+          : 14,
+      };
+    }
+  } catch {
+    // Ignore restricted storage
+  }
+  return { themeMode: 'auto', fontFamily: 'system', fontSize: 14 };
+}
+
+function saveLocalUiPrefs(ui) {
+  try {
+    window.localStorage?.setItem('pstack_studio_ui_prefs', JSON.stringify(ui));
+  } catch {
+    // Ignore restricted storage
+  }
+}
+
+function loadLocalUsage() {
+  try {
+    const raw = window.localStorage?.getItem('pstack_studio_usage');
+    if (raw) {
+      const p = JSON.parse(raw);
+      return {
+        presets: p?.presets && typeof p.presets === 'object' ? p.presets : {},
+        playbooks: p?.playbooks && typeof p.playbooks === 'object' ? p.playbooks : {},
+        skills: p?.skills && typeof p.skills === 'object' ? p.skills : {},
+        principles: p?.principles && typeof p.principles === 'object' ? p.principles : {},
+      };
+    }
+  } catch {
+    // Ignore restricted storage
+  }
+  return { presets: {}, playbooks: {}, skills: {}, principles: {} };
+}
+
+function saveLocalUsage(usage) {
+  try {
+    window.localStorage?.setItem('pstack_studio_usage', JSON.stringify(usage));
+  } catch {
+    // Ignore restricted storage
+  }
+}
+
+const initialUiPrefs = loadLocalUiPrefs();
+
 const state = {
   catalog: null,
   health: null,
   resolvedProjectId: '',
-  themeMode: 'auto', // 'auto' | 'light' | 'dark'
-  envPopoverOpen: false,
+  themeMode: initialUiPrefs.themeMode, // 'auto' | 'light' | 'dark'
+  fontFamily: initialUiPrefs.fontFamily, // 'system' | 'sans-cn' | 'mono' | 'serif'
+  fontSize: initialUiPrefs.fontSize, // 12..16
+  settingsOpen: false,
+  settingsTab: 'general', // 'general' | 'playbooks' | 'skills' | 'principles'
+  settingsDraft: {
+    playbookIdea: '',
+    skillPath: '',
+    skillLabel: '',
+    skillIdea: '',
+    prinTitleZh: '',
+    prinSlug: '',
+    prinGroup: 'core',
+    prinSummary: '',
+  },
+  usage: loadLocalUsage(),
 
   // Master list state
   sidebarTab: 'presets', // 'presets' | 'playbooks' | 'skills' | 'principles'
-  searchQuery: '',
   selectedNavKey: 'preset:scientific-bug-fix',
   viewingPrincipleId: null,
   mobileDetailOpen: false,
@@ -159,6 +269,92 @@ function applyThemeAttr() {
   }
 }
 
+function applyUiPreferences() {
+  applyThemeAttr();
+  const root = document.documentElement;
+  if (state.fontFamily && state.fontFamily !== 'system') {
+    root.setAttribute('data-font', state.fontFamily);
+  } else {
+    root.removeAttribute('data-font');
+  }
+  const size = Math.max(12, Math.min(16, Number(state.fontSize) || 14));
+  root.style.setProperty('--ps-base-size', `${size}px`);
+}
+
+function getPlaybookUsage(id) {
+  return Number(state.usage?.playbooks?.[id] || 0);
+}
+
+function getSkillUsage(id) {
+  return Number(state.usage?.skills?.[id] || 0);
+}
+
+function getPrincipleUsage(id) {
+  return Number(state.usage?.principles?.[id] || 0);
+}
+
+function getPresetUsage(recipe) {
+  if (!recipe) return 0;
+  const direct = Number(state.usage?.presets?.[recipe.id] || 0);
+  if (direct > 0) return direct;
+  if (recipe.primary?.type === 'playbook') return getPlaybookUsage(recipe.primary.id);
+  if (recipe.primary?.type === 'skill') return getSkillUsage(recipe.primary.id);
+  return 0;
+}
+
+function sortByUsageDesc(items, scoreFn) {
+  return items
+    .map((item, idx) => ({ item, idx, score: scoreFn(item) }))
+    .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.idx - b.idx))
+    .map((x) => x.item);
+}
+
+function recordCurrentDispatchUsage() {
+  const presetId = state.selectedNavKey?.startsWith('preset:')
+    ? state.selectedNavKey.slice('preset:'.length)
+    : '';
+  const playbookId = state.primary.type === 'playbook' ? state.primary.id : '';
+  const skillIds = [
+    ...(state.primary.type === 'skill' ? [state.primary.id] : []),
+    ...state.addonSkills,
+  ];
+  const principleIds = [...state.principles];
+
+  // Optimistic update for immediate sorting feedback
+  if (presetId) {
+    state.usage.presets[presetId] = (state.usage.presets[presetId] || 0) + 1;
+  }
+  if (playbookId) {
+    state.usage.playbooks[playbookId] = (state.usage.playbooks[playbookId] || 0) + 1;
+  }
+  for (const sid of new Set(skillIds)) {
+    state.usage.skills[sid] = (state.usage.skills[sid] || 0) + 1;
+  }
+  for (const pid of new Set(principleIds)) {
+    state.usage.principles[pid] = (state.usage.principles[pid] || 0) + 1;
+  }
+  saveLocalUsage(state.usage);
+  renderSidebarList();
+  renderStageRegion();
+  if (state.settingsOpen) renderSettingsRegion();
+
+  void apiFetch('/api/usage/record', {
+    method: 'POST',
+    body: JSON.stringify({ presetId, playbookId, skillIds, principleIds }),
+  })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (data?.usage) {
+        state.usage = data.usage;
+        saveLocalUsage(state.usage);
+        renderSidebarList();
+        renderStageRegion();
+        if (state.settingsOpen) renderSettingsRegion();
+      }
+    })
+    .catch(() => {});
+}
+
 function getComposed() {
   if (!state.catalog) {
     return { prompt: '', titleSuggestion: 'pstack', hasPlaceholder: true, hostOnlySlashes: [] };
@@ -232,22 +428,13 @@ function mountShell() {
       </div>
 
       <div class="topbar-right">
-        <div class="search-wrap">
-          <svg class="search-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-            <circle cx="7" cy="7" r="4.8"></circle>
-            <path d="M10.6 10.6L14 14" stroke-linecap="round"></path>
+        <button id="settings-btn" type="button" class="quiet-icon-btn" data-action="toggle-settings" title="打开插件设置">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.45" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.3"></circle>
+            <path d="M8 1.8v1.5M8 12.7v1.5M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M1.8 8h1.5M12.7 8h1.5M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" stroke-linecap="round"></path>
           </svg>
-          <input
-            id="global-search"
-            type="text"
-            class="search-input"
-            placeholder="搜索功能、Playbook 或 /命令…"
-            autocomplete="off"
-          />
-          <span id="search-kbd" class="search-kbd">⌘K</span>
-          <button id="search-clear" type="button" class="search-clear hidden" data-action="clear-search">清空</button>
-        </div>
-        <button id="theme-btn" type="button" class="quiet-icon-btn" data-action="cycle-theme" title="切换外观主题">自动</button>
+          <span id="settings-btn-label">设置</span>
+        </button>
       </div>
     </header>
 
@@ -262,22 +449,11 @@ function mountShell() {
       </main>
     </div>
 
+    <div id="settings-view" class="settings-workspace hidden"></div>
+
     <div id="modal-region"></div>
     <div id="toast-el" class="toast hidden"></div>
   `;
-
-  const searchEl = document.getElementById('global-search');
-  searchEl.addEventListener('input', (e) => {
-    state.searchQuery = e.target.value;
-    const hasQ = Boolean(state.searchQuery.trim());
-    document.getElementById('search-kbd')?.classList.toggle('hidden', hasQ);
-    document.getElementById('search-clear')?.classList.toggle('hidden', !hasQ);
-    if (hasQ && window.innerWidth < 680) {
-      state.mobileDetailOpen = false;
-      syncMobileClass();
-    }
-    renderSidebarList();
-  });
 
   root.addEventListener('click', handleDelegatedClick);
   window.addEventListener('keydown', handleGlobalKeydown);
@@ -287,108 +463,50 @@ function syncMobileClass() {
   document.getElementById('workspace-grid')?.classList.toggle('mobile-detail', state.mobileDetailOpen);
 }
 
+function syncSettingsVisibility() {
+  const wsEl = document.getElementById('workspace-grid');
+  const setEl = document.getElementById('settings-view');
+  const btn = document.getElementById('settings-btn');
+  const lbl = document.getElementById('settings-btn-label');
+  if (wsEl) wsEl.classList.toggle('hidden', state.settingsOpen);
+  if (setEl) setEl.classList.toggle('hidden', !state.settingsOpen);
+  if (btn) btn.classList.toggle('active', state.settingsOpen);
+  if (lbl) lbl.textContent = state.settingsOpen ? '返回工作台' : '设置';
+}
+
 function renderAll() {
-  renderThemeButton();
-  renderEnvRegion();
+  applyUiPreferences();
+  syncSettingsVisibility();
   renderSidebarTabs();
   renderSidebarList();
   renderStageRegion();
+  if (state.settingsOpen) {
+    renderSettingsRegion();
+  }
   renderModalRegion();
   syncMobileClass();
 }
 
-function renderThemeButton() {
-  const btn = document.getElementById('theme-btn');
-  if (!btn) return;
-  const map = { auto: '主题: 自动', light: '主题: 浅色', dark: '主题: 深色' };
-  btn.textContent = map[state.themeMode] || '主题: 自动';
-}
-
-function renderEnvRegion() {
-  const el = document.getElementById('env-region');
-  if (!el) return;
-  const s = state.health?.summary;
-  if (!s) {
-    el.innerHTML = '';
-    return;
-  }
-
-  const allReady = s.hasModelsRule && (s.hasVerifySkill || !s.hasWorkspace);
-  const label = !s.hasModelsRule
-    ? '未配置模型'
-    : !s.hasVerifySkill && s.hasWorkspace
-      ? '缺实测技能'
-      : s.workspaceName || '环境就绪';
-
-  el.innerHTML = `
-    <button type="button" class="env-btn" data-action="toggle-env-popover">
-      <span class="status-dot ${allReady ? '' : 'warn'}"></span>
-      <span>${esc(label)}</span>
-    </button>
-    ${
-      state.envPopoverOpen
-        ? `
-      <div class="env-popover">
-        <div class="env-row">
-          <span class="env-label">模型配置</span>
-          ${
-            s.hasModelsRule
-              ? `<span>${esc(s.modelsBudget || '已就绪')}</span>`
-              : `<button type="button" class="vs-jump-btn" data-action="select-skill" data-id="setup-pstack">去初始化 →</button>`
-          }
-        </div>
-        <div class="env-row">
-          <span class="env-label">项目实测技能</span>
-          ${
-            s.hasVerifySkill
-              ? `<span>${esc(s.verifySkills.join(', '))}</span>`
-              : `<button type="button" class="vs-jump-btn" data-action="select-skill" data-id="create-verification-skill">一键生成 →</button>`
-          }
-        </div>
-        ${
-          s.workspaceName
-            ? `
-          <div class="env-row">
-            <span class="env-label">当前仓库</span>
-            <span>${esc(s.workspaceName)}${s.gitHost === 'gitlab' ? ' (GitLab)' : ''}</span>
-          </div>
-        `
-            : ''
-        }
-        <div style="border-top:1px solid var(--ps-line);padding-top:6px;display:flex;justify-content:space-between;">
-          <button type="button" class="vs-jump-btn" data-action="select-skill" data-id="setup-pstack">调整模型档位</button>
-          ${
-            s.hasVerifySkill
-              ? `<button type="button" class="vs-jump-btn" data-action="select-skill" data-id="maintain-verification-skill">同步实测技能</button>`
-              : ''
-          }
-        </div>
-      </div>
-    `
-        : ''
-    }
-  `;
-}
-
 // ---------------------------------------------------------------------------
-// Left Sidebar Rendering
+// Left Sidebar Rendering (Usage-Frequency Ranked)
 // ---------------------------------------------------------------------------
 
 function renderSidebarTabs() {
   const el = document.getElementById('sidebar-tabs');
-  if (!el) return;
+  if (!el || !state.catalog) return;
+  const counts = state.catalog.counts || {};
   const tabs = [
     { id: 'presets', label: '常用' },
-    { id: 'playbooks', label: '流程 (22)' },
-    { id: 'skills', label: '技能 (33)' },
-    { id: 'principles', label: '原则 (24)' },
+    { id: 'playbooks', label: `流程 (${counts.playbooks ?? state.catalog.playbooks.length})` },
+    { id: 'skills', label: `技能 (${counts.skills ?? state.catalog.skills.length})` },
+    { id: 'principles', label: `原则 (${counts.principles ?? state.catalog.principles.length})` },
   ];
   el.innerHTML = tabs
     .map(
       (t) => `
       <button
         type="button"
-        class="s-tab ${state.sidebarTab === t.id && !state.searchQuery.trim() ? 'active' : ''}"
+        class="s-tab ${state.sidebarTab === t.id ? 'active' : ''}"
         data-action="switch-sidebar-tab"
         data-tab="${t.id}"
       >${esc(t.label)}</button>
@@ -401,12 +519,6 @@ function renderSidebarList() {
   const el = document.getElementById('sidebar-list');
   if (!el || !state.catalog) return;
 
-  const q = state.searchQuery.trim().toLowerCase();
-  if (q) {
-    el.innerHTML = renderSearchSidebarList(q);
-    return;
-  }
-
   if (state.sidebarTab === 'presets') {
     el.innerHTML = renderGroupedPresets();
   } else if (state.sidebarTab === 'playbooks') {
@@ -418,7 +530,17 @@ function renderSidebarList() {
   }
 }
 
-function renderNavRow({ navKey, action, id, title, enLabel, active }) {
+function renderNavRow({ navKey, action, id, title, enLabel, active, usageCount = 0, origin = '' }) {
+  const originTag =
+    origin === 'custom'
+      ? '<span class="origin-tag">自定义</span>'
+      : origin === 'external'
+        ? '<span class="origin-tag">外部</span>'
+        : '';
+  const usageTag =
+    usageCount > 0
+      ? `<span class="usage-badge" title="已使用 ${usageCount} 次">${usageCount}次</span>`
+      : '';
   return `
     <button
       type="button"
@@ -428,8 +550,14 @@ function renderNavRow({ navKey, action, id, title, enLabel, active }) {
       data-nav-key="${esc(navKey)}"
     >
       <div class="nav-item-top">
-        <span class="nav-item-title">${esc(title)}</span>
-        <span class="nav-item-en">${esc(enLabel)}</span>
+        <span class="nav-item-title-wrap">
+          <span class="nav-item-title">${esc(title)}</span>
+          ${originTag}
+        </span>
+        <span class="nav-item-meta">
+          ${usageTag}
+          <span class="nav-item-en">${esc(enLabel)}</span>
+        </span>
       </div>
     </button>
   `;
@@ -439,8 +567,34 @@ function renderGroupedPresets() {
   const cat = state.catalog;
   const order = ['debug', 'build', 'understand', 'verify', 'design', 'autopilot'];
   const chunks = [];
+
+  const used = sortByUsageDesc(
+    cat.recipes.filter((r) => getPresetUsage(r) > 0),
+    (r) => getPresetUsage(r)
+  );
+  const usedIds = new Set(used.map((r) => r.id));
+
+  if (used.length > 0) {
+    chunks.push(`<div class="group-heading">高频使用 · 按次数排序</div>`);
+    for (const r of used) {
+      const enLabel = r.titleEn || (r.primary.type === 'playbook' ? r.primary.id : `/${r.primary.id}`);
+      const navKey = `preset:${r.id}`;
+      chunks.push(
+        renderNavRow({
+          navKey,
+          action: 'select-preset',
+          id: r.id,
+          title: r.title,
+          enLabel,
+          usageCount: getPresetUsage(r),
+          active: state.selectedNavKey === navKey && !state.viewingPrincipleId,
+        })
+      );
+    }
+  }
+
   for (const scId of order) {
-    const items = cat.recipes.filter((r) => r.scenario === scId);
+    const items = cat.recipes.filter((r) => r.scenario === scId && !usedIds.has(r.id));
     if (items.length === 0) continue;
     chunks.push(`<div class="group-heading">${esc(findScenarioTitle(scId))}</div>`);
     for (const r of items) {
@@ -465,27 +619,49 @@ function renderGroupedPlaybooks() {
   const cat = state.catalog;
   const order = ['debug', 'build', 'understand', 'design', 'verify', 'autopilot'];
   const chunks = [];
+
+  const renderPb = (pb) => {
+    const navKey = `playbook:${pb.id}`;
+    const isSelected =
+      !state.viewingPrincipleId &&
+      (state.selectedNavKey === navKey ||
+        (state.primary.type === 'playbook' && state.primary.id === pb.id && state.sidebarTab === 'playbooks'));
+    return renderNavRow({
+      navKey,
+      action: 'select-playbook',
+      id: pb.id,
+      title: pb.titleZh,
+      enLabel: pb.titleEn || pb.id,
+      usageCount: getPlaybookUsage(pb.id),
+      origin: pb.origin === 'custom' ? 'custom' : '',
+      active: isSelected,
+    });
+  };
+
+  const used = sortByUsageDesc(
+    cat.playbooks.filter((p) => getPlaybookUsage(p.id) > 0),
+    (p) => getPlaybookUsage(p.id)
+  );
+  const usedIds = new Set(used.map((p) => p.id));
+
+  if (used.length > 0) {
+    chunks.push(`<div class="group-heading">高频使用 · 按次数排序</div>`);
+    for (const pb of used) chunks.push(renderPb(pb));
+  }
+
+  const unusedCustom = cat.playbooks.filter((p) => p.origin === 'custom' && !usedIds.has(p.id));
+  if (unusedCustom.length > 0) {
+    chunks.push(`<div class="group-heading">自定义流程 Custom</div>`);
+    for (const pb of unusedCustom) chunks.push(renderPb(pb));
+  }
+
   for (const scId of order) {
-    const items = cat.playbooks.filter((p) => p.scenario === scId);
+    const items = cat.playbooks.filter(
+      (p) => p.origin !== 'custom' && p.scenario === scId && !usedIds.has(p.id)
+    );
     if (items.length === 0) continue;
     chunks.push(`<div class="group-heading">${esc(findScenarioTitle(scId))}</div>`);
-    for (const pb of items) {
-      const navKey = `playbook:${pb.id}`;
-      const isSelected =
-        !state.viewingPrincipleId &&
-        (state.selectedNavKey === navKey ||
-          (state.primary.type === 'playbook' && state.primary.id === pb.id && state.sidebarTab === 'playbooks'));
-      chunks.push(
-        renderNavRow({
-          navKey,
-          action: 'select-playbook',
-          id: pb.id,
-          title: pb.titleZh,
-          enLabel: pb.titleEn || pb.id,
-          active: isSelected,
-        })
-      );
-    }
+    for (const pb of items) chunks.push(renderPb(pb));
   }
   return chunks.join('');
 }
@@ -494,27 +670,51 @@ function renderGroupedSkills() {
   const cat = state.catalog;
   const order = ['understand', 'design', 'debug', 'build', 'verify', 'autopilot'];
   const chunks = [];
+
+  const renderSk = (sk) => {
+    const navKey = `skill:${sk.id}`;
+    const isSelected =
+      !state.viewingPrincipleId &&
+      (state.selectedNavKey === navKey ||
+        (state.primary.type === 'skill' && state.primary.id === sk.id && state.sidebarTab === 'skills'));
+    return renderNavRow({
+      navKey,
+      action: 'select-skill',
+      id: sk.id,
+      title: sk.titleZh,
+      enLabel: sk.slash,
+      usageCount: getSkillUsage(sk.id),
+      origin: sk.origin === 'custom' || sk.origin === 'external' ? sk.origin : '',
+      active: isSelected,
+    });
+  };
+
+  const used = sortByUsageDesc(
+    cat.skills.filter((s) => getSkillUsage(s.id) > 0),
+    (s) => getSkillUsage(s.id)
+  );
+  const usedIds = new Set(used.map((s) => s.id));
+
+  if (used.length > 0) {
+    chunks.push(`<div class="group-heading">高频使用 · 按次数排序</div>`);
+    for (const sk of used) chunks.push(renderSk(sk));
+  }
+
+  const unusedCustom = cat.skills.filter(
+    (s) => (s.origin === 'custom' || s.origin === 'external') && !usedIds.has(s.id)
+  );
+  if (unusedCustom.length > 0) {
+    chunks.push(`<div class="group-heading">扩展技能 Custom / External</div>`);
+    for (const sk of unusedCustom) chunks.push(renderSk(sk));
+  }
+
   for (const scId of order) {
-    const items = cat.skills.filter((s) => s.scenario === scId);
+    const items = cat.skills.filter(
+      (s) => s.origin === 'builtin' && s.scenario === scId && !usedIds.has(s.id)
+    );
     if (items.length === 0) continue;
     chunks.push(`<div class="group-heading">${esc(findScenarioTitle(scId))}</div>`);
-    for (const sk of items) {
-      const navKey = `skill:${sk.id}`;
-      const isSelected =
-        !state.viewingPrincipleId &&
-        (state.selectedNavKey === navKey ||
-          (state.primary.type === 'skill' && state.primary.id === sk.id && state.sidebarTab === 'skills'));
-      chunks.push(
-        renderNavRow({
-          navKey,
-          action: 'select-skill',
-          id: sk.id,
-          title: sk.titleZh,
-          enLabel: sk.slash,
-          active: isSelected,
-        })
-      );
-    }
+    for (const sk of items) chunks.push(renderSk(sk));
   }
   return chunks.join('');
 }
@@ -528,93 +728,46 @@ function renderGroupedPrinciples() {
     { id: 'meta', label: '元原则 Meta' },
   ];
   const chunks = [];
+
+  const renderPr = (pr) => {
+    const pinned = state.principles.includes(pr.id);
+    return renderNavRow({
+      navKey: `principle:${pr.id}`,
+      action: 'inspect-principle',
+      id: pr.id,
+      title: `${pinned ? '✓ ' : ''}${pr.titleZh}`,
+      enLabel: pr.titleEn || pr.shortSlug,
+      usageCount: getPrincipleUsage(pr.id),
+      origin: pr.origin === 'custom' ? 'custom' : '',
+      active: state.viewingPrincipleId === pr.id,
+    });
+  };
+
+  const used = sortByUsageDesc(
+    state.catalog.principles.filter((p) => getPrincipleUsage(p.id) > 0),
+    (p) => getPrincipleUsage(p.id)
+  );
+  const usedIds = new Set(used.map((p) => p.id));
+  if (used.length > 0) {
+    chunks.push(`<div class="group-heading">高频使用 · 按次数排序</div>`);
+    for (const pr of used) chunks.push(renderPr(pr));
+  }
+
+  const unusedCustom = state.catalog.principles.filter((p) => p.origin === 'custom' && !usedIds.has(p.id));
+  if (unusedCustom.length > 0) {
+    chunks.push(`<div class="group-heading">自定义原则 Custom</div>`);
+    for (const pr of unusedCustom) chunks.push(renderPr(pr));
+  }
+
   for (const g of groups) {
-    const items = state.catalog.principles.filter((p) => p.group === g.id);
+    const items = state.catalog.principles.filter(
+      (p) => p.origin !== 'custom' && p.group === g.id && !usedIds.has(p.id)
+    );
     if (items.length === 0) continue;
     chunks.push(`<div class="group-heading">${esc(g.label)}</div>`);
-    for (const pr of items) {
-      const pinned = state.principles.includes(pr.id);
-      chunks.push(
-        renderNavRow({
-          navKey: `principle:${pr.id}`,
-          action: 'inspect-principle',
-          id: pr.id,
-          title: `${pinned ? '✓ ' : ''}${pr.titleZh}`,
-          enLabel: pr.titleEn || pr.shortSlug,
-          active: state.viewingPrincipleId === pr.id,
-        })
-      );
-    }
+    for (const pr of items) chunks.push(renderPr(pr));
   }
   return chunks.join('');
-}
-
-function renderSearchSidebarList(q) {
-  const cat = state.catalog;
-  const hit = (...vals) => vals.some((v) => String(v || '').toLowerCase().includes(q));
-
-  const playbooks = cat.playbooks.filter((p) =>
-    hit(p.id, p.titleZh, p.titleEn, p.shortDesc, p.whenToUse, p.builtinSkills.join(' '))
-  );
-  const skills = cat.skills.filter((s) =>
-    hit(s.id, s.slash, s.titleZh, s.titleEn, s.shortDesc, s.whenToUse, s.roleTag)
-  );
-  const principles = cat.principles.filter((p) =>
-    hit(p.id, p.shortSlug, p.titleZh, p.titleEn, p.summary)
-  );
-
-  if (playbooks.length + skills.length + principles.length === 0) {
-    return `<div class="empty-list">没有匹配「${esc(state.searchQuery)}」的条目</div>`;
-  }
-
-  const out = [];
-  if (playbooks.length > 0) {
-    out.push(`<div class="group-heading">流程 Playbooks (${playbooks.length})</div>`);
-    for (const pb of playbooks) {
-      out.push(
-        renderNavRow({
-          navKey: `playbook:${pb.id}`,
-          action: 'select-playbook',
-          id: pb.id,
-          title: pb.titleZh,
-          enLabel: pb.titleEn || pb.id,
-          active: !state.viewingPrincipleId && state.primary.type === 'playbook' && state.primary.id === pb.id,
-        })
-      );
-    }
-  }
-  if (skills.length > 0) {
-    out.push(`<div class="group-heading">技能 Skills (${skills.length})</div>`);
-    for (const sk of skills) {
-      out.push(
-        renderNavRow({
-          navKey: `skill:${sk.id}`,
-          action: 'select-skill',
-          id: sk.id,
-          title: sk.titleZh,
-          enLabel: sk.slash,
-          active: !state.viewingPrincipleId && state.primary.type === 'skill' && state.primary.id === sk.id,
-        })
-      );
-    }
-  }
-  if (principles.length > 0) {
-    out.push(`<div class="group-heading">原则 Principles (${principles.length})</div>`);
-    for (const pr of principles) {
-      const pinned = state.principles.includes(pr.id);
-      out.push(
-        renderNavRow({
-          navKey: `principle:${pr.id}`,
-          action: 'inspect-principle',
-          id: pr.id,
-          title: `${pinned ? '✓ ' : ''}${pr.titleZh}`,
-          enLabel: pr.titleEn || pr.shortSlug,
-          active: state.viewingPrincipleId === pr.id,
-        })
-      );
-    }
-  }
-  return out.join('');
 }
 
 // ---------------------------------------------------------------------------
@@ -1032,14 +1185,28 @@ function renderCustomizeShelfHtml() {
     'unslop',
     'typescript-best-practices',
   ];
-  const allSelectableSkills = cat.skills.filter(
-    (s) => !(state.primary.type === 'skill' && state.primary.id === s.id)
+  const allSelectableSkills = sortByUsageDesc(
+    cat.skills.filter((s) => !(state.primary.type === 'skill' && state.primary.id === s.id)),
+    (s) => getSkillUsage(s.id)
   );
   const shownSkills = state.showAllShelfSkills
     ? allSelectableSkills
-    : quickSkillIds
-        .map((id) => findSkill(id))
-        .filter((s) => s && !(state.primary.type === 'skill' && state.primary.id === s.id));
+    : (() => {
+        const usedTop = allSelectableSkills.filter((s) => getSkillUsage(s.id) > 0);
+        const defaults = quickSkillIds
+          .map((id) => findSkill(id))
+          .filter((s) => s && !(state.primary.type === 'skill' && state.primary.id === s.id));
+        const seen = new Set();
+        const merged = [];
+        for (const s of [...usedTop, ...defaults]) {
+          if (!seen.has(s.id)) {
+            seen.add(s.id);
+            merged.push(s);
+          }
+          if (merged.length >= 10) break;
+        }
+        return merged;
+      })();
 
   const quickPrincipleIds = [
     'principle-prove-it-works',
@@ -1049,9 +1216,26 @@ function renderCustomizeShelfHtml() {
     'principle-subtract-before-you-add',
     'principle-minimize-reader-load',
   ];
+  const sortedPrinciples = sortByUsageDesc(cat.principles, (p) => getPrincipleUsage(p.id));
   const shownPrinciples = state.showAllShelfPrinciples
-    ? cat.principles
-    : quickPrincipleIds.map((id) => findPrinciple(id)).filter(Boolean);
+    ? sortedPrinciples
+    : (() => {
+        const usedTop = sortedPrinciples.filter((p) => getPrincipleUsage(p.id) > 0);
+        const defaults = quickPrincipleIds.map((id) => findPrinciple(id)).filter(Boolean);
+        const seen = new Set();
+        const merged = [];
+        for (const p of [...usedTop, ...defaults]) {
+          if (!seen.has(p.id)) {
+            seen.add(p.id);
+            merged.push(p);
+          }
+          if (merged.length >= 6) break;
+        }
+        return merged;
+      })();
+
+  const hasSkillCounts = allSelectableSkills.some((s) => getSkillUsage(s.id) > 0);
+  const hasPrinCounts = sortedPrinciples.some((p) => getPrincipleUsage(p.id) > 0);
 
   return `
     <div class="customize-shelf">
@@ -1092,7 +1276,7 @@ function renderCustomizeShelfHtml() {
 
       <div class="shelf-group">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <span class="shelf-title">叠加技能（${state.showAllShelfSkills ? `全部 ${allSelectableSkills.length} 个` : `常用 ${shownSkills.length} / ${allSelectableSkills.length}`}）</span>
+          <span class="shelf-title">叠加技能（${state.showAllShelfSkills ? `全部 ${allSelectableSkills.length} 个` : `常用 ${shownSkills.length} / ${allSelectableSkills.length}`}${hasSkillCounts ? ' · 已按使用频次靠前' : ''}）</span>
           <button type="button" class="text-link" data-action="toggle-shelf-skills">
             ${state.showAllShelfSkills ? '收起为常用 ▴' : `展开全部 ${allSelectableSkills.length} 个 ▾`}
           </button>
@@ -1101,7 +1285,8 @@ function renderCustomizeShelfHtml() {
           ${shownSkills
             .map((s) => {
               const on = state.addonSkills.includes(s.id);
-              return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-addon-skill" data-id="${esc(s.id)}" title="${esc(s.titleEn)} · ${esc(s.shortDesc)}">${esc(s.slash)} ${esc(s.titleZh)}</button>`;
+              const cnt = getSkillUsage(s.id);
+              return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-addon-skill" data-id="${esc(s.id)}" title="${esc(s.titleEn)} · ${esc(s.shortDesc)}"><span>${esc(s.slash)} ${esc(s.titleZh)}</span>${cnt > 0 ? `<span class="pill-count">${cnt}</span>` : ''}</button>`;
             })
             .join('')}
         </div>
@@ -1109,7 +1294,7 @@ function renderCustomizeShelfHtml() {
 
       <div class="shelf-group">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <span class="shelf-title">工程原则（${state.showAllShelfPrinciples ? `全部 ${cat.principles.length} 条` : `常用 ${shownPrinciples.length} / ${cat.principles.length}`}）</span>
+          <span class="shelf-title">工程原则（${state.showAllShelfPrinciples ? `全部 ${cat.principles.length} 条` : `常用 ${shownPrinciples.length} / ${cat.principles.length}`}${hasPrinCounts ? ' · 已按使用频次靠前' : ''}）</span>
           <button type="button" class="text-link" data-action="toggle-shelf-principles">
             ${state.showAllShelfPrinciples ? '收起为常用 ▴' : `展开全部 ${cat.principles.length} 条 ▾`}
           </button>
@@ -1118,7 +1303,8 @@ function renderCustomizeShelfHtml() {
           ${shownPrinciples
             .map((pr) => {
               const on = state.principles.includes(pr.id);
-              return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-principle" data-id="${esc(pr.id)}" title="${esc(pr.titleEn)}：${esc(pr.summary)}">${esc(pr.titleZh)}</button>`;
+              const cnt = getPrincipleUsage(pr.id);
+              return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-principle" data-id="${esc(pr.id)}" title="${esc(pr.titleEn)}：${esc(pr.summary)}"><span>${esc(pr.titleZh)}</span>${cnt > 0 ? `<span class="pill-count">${cnt}</span>` : ''}</button>`;
             })
             .join('')}
         </div>
@@ -1182,6 +1368,738 @@ function handleSubmitShortcut(e) {
     e.preventDefault();
     executeActiveLaunchMode();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Settings Full-Pane View (General / Playbooks / Skills / Principles)
+// ---------------------------------------------------------------------------
+
+function sumCountMap(map) {
+  return Object.values(map || {}).reduce((acc, n) => acc + (Number(n) || 0), 0);
+}
+
+function renderSettingsRegion() {
+  const el = document.getElementById('settings-view');
+  if (!el || !state.catalog) return;
+
+  const navHtml = `
+    <nav class="settings-nav" aria-label="设置分类">
+      <div class="settings-nav-heading">设置 Settings</div>
+      ${SETTINGS_TABS.map(
+        (t) => `
+        <button
+          type="button"
+          class="settings-nav-item ${state.settingsTab === t.id ? 'active' : ''}"
+          data-action="switch-settings-tab"
+          data-tab="${t.id}"
+        >
+          <span>${esc(t.title)}</span>
+          <span class="settings-nav-sub">${esc(t.sub)}</span>
+        </button>
+      `
+      ).join('')}
+      <div class="settings-nav-footer">
+        <button type="button" class="settings-nav-item" data-action="refresh-catalog">
+          <span>重新扫描目录</span>
+          <span class="settings-nav-sub">Refresh</span>
+        </button>
+        <button type="button" class="settings-nav-item" data-action="toggle-settings">
+          <span>← 返回工作台</span>
+          <span class="settings-nav-sub">Esc</span>
+        </button>
+      </div>
+    </nav>
+  `;
+
+  let bodyHtml = '';
+  if (state.settingsTab === 'general') {
+    bodyHtml = renderSettingsGeneralTab();
+  } else if (state.settingsTab === 'playbooks') {
+    bodyHtml = renderSettingsPlaybooksTab();
+  } else if (state.settingsTab === 'skills') {
+    bodyHtml = renderSettingsSkillsTab();
+  } else {
+    bodyHtml = renderSettingsPrinciplesTab();
+  }
+
+  el.innerHTML = `${navHtml}<div class="settings-body"><div class="settings-inner">${bodyHtml}</div></div>`;
+  bindSettingsInputs();
+}
+
+function renderSettingsGeneralTab() {
+  const themeChoices = [
+    { id: 'auto', label: '跟随宿主 (自动)' },
+    { id: 'light', label: '浅色 Light' },
+    { id: 'dark', label: '深色 Dark' },
+  ];
+  const pbTotal = sumCountMap(state.usage?.playbooks);
+  const skTotal = sumCountMap(state.usage?.skills);
+  const presetTotal = sumCountMap(state.usage?.presets);
+
+  return `
+    <div class="settings-header">
+      <div>
+        <h1 class="settings-title">通用设置</h1>
+        <p class="settings-desc">配置面板外观主题、字体族与界面字号，所有设置均保存在本地用户配置目录，不影响上游插件更新。</p>
+      </div>
+    </div>
+
+    <section class="settings-card">
+      <div>
+        <h2 class="settings-card-title">主题颜色</h2>
+        <p class="settings-card-sub">选择跟随 Antigravity 宿主明暗外观，或手动锁定为浅色 / 深色。</p>
+      </div>
+      <div class="seg-group">
+        ${themeChoices
+          .map(
+            (t) => `
+          <button
+            type="button"
+            class="seg-btn ${state.themeMode === t.id ? 'active' : ''}"
+            data-action="set-theme-mode"
+            data-value="${t.id}"
+          >${esc(t.label)}</button>
+        `
+          )
+          .join('')}
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div>
+        <h2 class="settings-card-title">界面字体</h2>
+        <p class="settings-card-sub">即时切换左侧目录、流程图说明与所见即所得编辑器的正文字体。</p>
+      </div>
+      <div class="font-grid">
+        ${FONT_OPTIONS.map(
+          (f) => `
+          <button
+            type="button"
+            class="font-card ${state.fontFamily === f.id ? 'active' : ''}"
+            data-action="set-font-family"
+            data-value="${f.id}"
+          >
+            <span class="font-card-sample" style="font-family:${esc(f.previewStyle)};">${esc(f.sample)}</span>
+            <span class="font-card-name">${esc(f.name)}</span>
+          </button>
+        `
+        ).join('')}
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div>
+        <h2 class="settings-card-title">字号大小（当前 ${state.fontSize}px）</h2>
+        <p class="settings-card-sub">按比例协调缩放全局字号，方便在高分屏或窄侧边栏下阅读。</p>
+      </div>
+      <div class="seg-group">
+        ${FONT_SIZE_OPTIONS.map(
+          (opt) => `
+          <button
+            type="button"
+            class="seg-btn ${state.fontSize === opt.size ? 'active' : ''}"
+            data-action="set-font-size"
+            data-value="${opt.size}"
+          >${esc(opt.label)}</button>
+        `
+        ).join('')}
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2 class="settings-card-title">使用频次排序统计</h2>
+          <p class="settings-card-sub">每次发送或复制指令时自动记录流程与技能使用次数，高频条目会自动排在左侧目录与右侧搭配选项最前方。</p>
+        </div>
+        <button type="button" class="btn btn-ghost" data-action="reset-usage">重置所有计数</button>
+      </div>
+      <div class="settings-stats-grid">
+        <div class="settings-stat-box">
+          <div class="settings-stat-num">${pbTotal}</div>
+          <div class="settings-stat-label">流程累计执行</div>
+        </div>
+        <div class="settings-stat-box">
+          <div class="settings-stat-num">${skTotal}</div>
+          <div class="settings-stat-label">技能累计调用</div>
+        </div>
+        <div class="settings-stat-box">
+          <div class="settings-stat-num">${presetTotal}</div>
+          <div class="settings-stat-label">常用组合累计</div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderSettingsPlaybooksTab() {
+  const cat = state.catalog;
+  const userDir = cat.userPaths?.playbooksDir || '~/.gemini/config/pstack-studio/playbooks';
+  const customPlaybooks = cat.playbooks.filter((p) => p.origin === 'custom');
+
+  return `
+    <div class="settings-header">
+      <div>
+        <h1 class="settings-title">流程管理（Playbooks）</h1>
+        <p class="settings-desc">内置 ${cat.counts.builtinPlaybooks ?? 22} 条流程保持只读以持续跟随上游更新；新增自定义流程存放于本地独立目录，写入后自动发现并生成可点击流程图。</p>
+      </div>
+      <button type="button" class="btn btn-secondary" data-action="refresh-catalog">刷新扫描</button>
+    </div>
+
+    <section class="settings-card">
+      <div>
+        <h2 class="settings-card-title">通过主对话让 Agent 新建流程</h2>
+        <p class="settings-card-sub">直接将固定目录路径、Frontmatter 规范与已有技能清单发送给主对话 Agent，由 Agent 装配写入文件，无需额外注册工具。</p>
+      </div>
+      <div class="settings-path-box">
+        <span>${esc(userDir)}</span>
+        <button type="button" class="text-link" data-action="copy-path" data-path="${esc(userDir)}">复制路径</button>
+      </div>
+      <textarea
+        id="settings-playbook-idea"
+        class="settings-textarea"
+        placeholder="选填：描述你想装配的新流程（例如：后端接口发布前依次执行影响面分析 /blast-radius、红绿单测 /tdd 与对抗审查 /interrogate）…"
+      >${esc(state.settingsDraft.playbookIdea)}</textarea>
+      <div class="settings-form-row">
+        <button type="button" class="btn btn-primary" data-action="agent-create-playbook">发送到主对话新建流程</button>
+        <button type="button" class="btn btn-ghost" data-action="copy-agent-create-playbook">复制新建规范提示词</button>
+      </div>
+      <details class="settings-schema-details">
+        <summary>查看自定义流程文件格式约定（&lt;slug&gt;.md + 可选 &lt;slug&gt;.graph.json）</summary>
+        <pre class="settings-schema-pre">---
+titleZh: 接口发布前检查
+titleEn: Release Gate
+scenario: verify        # debug | build | understand | design | verify | autopilot
+whenToUse: 合并高风险后端改动前依次检查影响面与测试证据
+deliverable: 影响面清单、测试输出与审查结论
+builtinSkills: blast-radius, interrogate
+builtinPrinciples: principle-prove-it-works
+---
+
+# Release Gate
+
+1. 评估变更影响面：运行 /blast-radius 列出受影响调用方。
+2. 补齐边界测试：调用 /tdd 验证核心与异常路径。
+3. 合入前对抗审查：执行 /interrogate 复核关键风险。
+
+**Reply:** 汇总影响面、测试证据与最终放行结论。</pre>
+      </details>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <h2 class="settings-card-title">自定义流程（${customPlaybooks.length}）</h2>
+        <span class="settings-card-sub">内置只读：${cat.counts.builtinPlaybooks ?? 22} 条</span>
+      </div>
+      ${
+        customPlaybooks.length === 0
+          ? `<div class="empty-list" style="padding:14px 8px;">暂无自定义流程。点击上方「发送到主对话新建流程」，或在目录中新增 <code>.md</code> 后点刷新扫描。</div>`
+          : `
+        <div class="settings-item-list">
+          ${customPlaybooks
+            .map(
+              (pb) => `
+            <div class="settings-item-row">
+              <div class="settings-item-main">
+                <div class="settings-item-title">
+                  <span>${esc(pb.titleZh)}</span>
+                  <span class="origin-tag">${esc(pb.id)}</span>
+                </div>
+                <div class="settings-item-path">${esc(pb.sourceFilePath || pb.relPath)}</div>
+              </div>
+              <div class="settings-item-actions">
+                <button type="button" class="text-link" data-action="open-item-from-settings" data-kind="playbook" data-id="${esc(pb.id)}">去使用</button>
+                <button type="button" class="text-link" data-action="open-source" data-path="${esc(pb.relPath)}">查看原文</button>
+                <button type="button" class="btn-danger-link" data-action="delete-user-item" data-kind="playbook" data-id="${esc(pb.id)}">删除</button>
+              </div>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      `
+      }
+    </section>
+  `;
+}
+
+function renderSettingsSkillsTab() {
+  const cat = state.catalog;
+  const userSkillsDir = cat.userPaths?.skillsDir || '~/.gemini/config/pstack-studio/skills';
+  const skillDirs = cat.settings?.skillDirs || [];
+  const customSkills = cat.skills.filter((s) => s.origin !== 'builtin');
+
+  return `
+    <div class="settings-header">
+      <div>
+        <h1 class="settings-title">技能管理（Skills）</h1>
+        <p class="settings-desc">内置 ${cat.counts.builtinSkills ?? 33} 个技能保持只读以持续接收上游更新。可通过挂载外部文件夹路径直接引入团队/个人技能，或让主对话 Agent 新建自定义技能。</p>
+      </div>
+      <button type="button" class="btn btn-secondary" data-action="refresh-catalog">刷新扫描</button>
+    </div>
+
+    <section class="settings-card">
+      <div>
+        <h2 class="settings-card-title">按路径挂载外部技能文件夹</h2>
+        <p class="settings-card-sub">支持填写单个含 <code>SKILL.md</code> 的技能目录，或包含多个 <code>&lt;skill&gt;/SKILL.md</code> 子目录的父文件夹（支持 <code>~/</code> 开头）。</p>
+      </div>
+      <div class="settings-form-row">
+        <input
+          id="settings-skill-dir-path"
+          type="text"
+          class="settings-input grow"
+          placeholder="例如：~/my-skills 或 /data/team-repo/.agents/skills"
+          value="${esc(state.settingsDraft.skillPath)}"
+        />
+        <input
+          id="settings-skill-dir-label"
+          type="text"
+          class="settings-input"
+          style="width:140px;"
+          placeholder="备注名（选填）"
+          value="${esc(state.settingsDraft.skillLabel)}"
+        />
+        <button type="button" class="btn btn-primary" data-action="add-skill-dir">添加路径</button>
+      </div>
+
+      ${
+        skillDirs.length === 0
+          ? `<div class="empty-list" style="padding:10px 4px;">尚未挂载外部技能文件夹。</div>`
+          : `
+        <div class="settings-item-list">
+          ${skillDirs
+            .map(
+              (d) => `
+            <div class="settings-item-row">
+              <div class="settings-item-main">
+                <div class="settings-item-title">
+                  <span class="status-dot ${d.exists ? '' : 'warn'}"></span>
+                  <span>${esc(d.label || d.path)}</span>
+                  <span class="origin-tag">${d.exists ? `发现 ${d.discoveredCount} 个技能` : '目录不存在'}</span>
+                </div>
+                <div class="settings-item-path">${esc(d.resolvedPath || d.path)}</div>
+                ${
+                  d.loadedIds?.length
+                    ? `<div class="settings-card-sub">已载入：${esc(d.loadedIds.map((x) => `/${x}`).join('、'))}</div>`
+                    : ''
+                }
+                ${
+                  d.skippedConflicts?.length
+                    ? `<div class="settings-card-sub">跳过与内置重名项：${esc(d.skippedConflicts.join('、'))}</div>`
+                    : ''
+                }
+              </div>
+              <div class="settings-item-actions">
+                <button type="button" class="btn-danger-link" data-action="remove-skill-dir" data-path="${esc(d.path)}">移除</button>
+              </div>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      `
+      }
+    </section>
+
+    <section class="settings-card">
+      <div>
+        <h2 class="settings-card-title">通过主对话让 Agent 新建自定义技能</h2>
+        <p class="settings-card-sub">Agent 直接将新技能写入固定扩展目录，插件自动读取，且拼装指令时会自动附带文件路径，无需修改插件源码。</p>
+      </div>
+      <div class="settings-path-box">
+        <span>${esc(userSkillsDir)}</span>
+        <button type="button" class="text-link" data-action="copy-path" data-path="${esc(userSkillsDir)}">复制路径</button>
+      </div>
+      <textarea
+        id="settings-skill-idea"
+        class="settings-textarea"
+        placeholder="选填：描述你想新建的技能用途（例如：按团队规范自动生成数据库迁移脚本与回滚 SQL）…"
+      >${esc(state.settingsDraft.skillIdea)}</textarea>
+      <div class="settings-form-row">
+        <button type="button" class="btn btn-primary" data-action="agent-create-skill">发送到主对话新建技能</button>
+        <button type="button" class="btn btn-ghost" data-action="copy-agent-create-skill">复制新建规范提示词</button>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <h2 class="settings-card-title">已扩展的技能（${customSkills.length}）</h2>
+        <span class="settings-card-sub">内置只读：${cat.counts.builtinSkills ?? 33} 个</span>
+      </div>
+      ${
+        customSkills.length === 0
+          ? `<div class="empty-list" style="padding:12px 4px;">暂无扩展技能。挂载目录或让 Agent 新建后会自动出现在这里与右侧搭配区。</div>`
+          : `
+        <div class="settings-item-list">
+          ${customSkills
+            .map(
+              (sk) => `
+            <div class="settings-item-row">
+              <div class="settings-item-main">
+                <div class="settings-item-title">
+                  <span>${esc(sk.titleZh)}</span>
+                  <span class="origin-tag">${esc(sk.slash)}</span>
+                  <span class="origin-tag">${sk.origin === 'external' ? '外部路径' : '自定义目录'}</span>
+                </div>
+                <div class="settings-item-path">${esc(sk.sourceFilePath || sk.relPath)}</div>
+              </div>
+              <div class="settings-item-actions">
+                <button type="button" class="text-link" data-action="open-item-from-settings" data-kind="skill" data-id="${esc(sk.id)}">去使用</button>
+                <button type="button" class="text-link" data-action="open-source" data-path="${esc(sk.relPath)}">查看原文</button>
+                ${
+                  sk.origin === 'custom'
+                    ? `<button type="button" class="btn-danger-link" data-action="delete-user-item" data-kind="skill" data-id="${esc(sk.id)}">删除</button>`
+                    : ''
+                }
+              </div>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      `
+      }
+    </section>
+  `;
+}
+
+function renderSettingsPrinciplesTab() {
+  const cat = state.catalog;
+  const userPrinDir = cat.userPaths?.principlesDir || '~/.gemini/config/pstack-studio/principles';
+  const customPrinciples = cat.principles.filter((p) => p.origin === 'custom');
+
+  return `
+    <div class="settings-header">
+      <div>
+        <h1 class="settings-title">原则管理（Principles）</h1>
+        <p class="settings-desc">内置 ${cat.counts.builtinPrinciples ?? 24} 条原则保持只读以同步上游演进；在此新增团队或个人工程原则，自动加入左侧原则列表与右侧搭配护栏。</p>
+      </div>
+      <button type="button" class="btn btn-secondary" data-action="refresh-catalog">刷新扫描</button>
+    </div>
+
+    <section class="settings-card">
+      <div>
+        <h2 class="settings-card-title">快速新增工程原则</h2>
+        <p class="settings-card-sub">保存为 Markdown 文件至 <code>${esc(userPrinDir)}</code>，也可一键交给主对话 Agent 润色生成。</p>
+      </div>
+      <div class="settings-form-row">
+        <input
+          id="settings-prin-title"
+          type="text"
+          class="settings-input grow"
+          placeholder="中文名称，例如：接口向后兼容优先"
+          value="${esc(state.settingsDraft.prinTitleZh)}"
+        />
+        <input
+          id="settings-prin-slug"
+          type="text"
+          class="settings-input"
+          style="width:190px;"
+          placeholder="英文 slug，如 api-compat"
+          value="${esc(state.settingsDraft.prinSlug)}"
+        />
+        <select id="settings-prin-group" class="settings-select">
+          <option value="core" ${state.settingsDraft.prinGroup === 'core' ? 'selected' : ''}>核心原则 Core</option>
+          <option value="architecture" ${state.settingsDraft.prinGroup === 'architecture' ? 'selected' : ''}>架构原则 Architecture</option>
+          <option value="verification" ${state.settingsDraft.prinGroup === 'verification' ? 'selected' : ''}>验证原则 Verification</option>
+          <option value="delegation" ${state.settingsDraft.prinGroup === 'delegation' ? 'selected' : ''}>协同原则 Delegation</option>
+          <option value="meta" ${state.settingsDraft.prinGroup === 'meta' ? 'selected' : ''}>元原则 Meta</option>
+        </select>
+      </div>
+      <textarea
+        id="settings-prin-summary"
+        class="settings-textarea"
+        placeholder="一句话工程准则（例如：对外部公开接口只做增量扩展，变更已有字段前必须保留兼容过渡并验证旧调用方）"
+      >${esc(state.settingsDraft.prinSummary)}</textarea>
+      <div class="settings-form-row">
+        <button type="button" class="btn btn-primary" data-action="create-principle">直接保存原则</button>
+        <button type="button" class="btn btn-secondary" data-action="agent-create-principle">发送到主对话让 Agent 撰写</button>
+        <button type="button" class="btn btn-ghost" data-action="copy-agent-create-principle">复制规范提示词</button>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <h2 class="settings-card-title">自定义原则（${customPrinciples.length}）</h2>
+        <span class="settings-card-sub">内置只读：${cat.counts.builtinPrinciples ?? 24} 条</span>
+      </div>
+      ${
+        customPrinciples.length === 0
+          ? `<div class="empty-list" style="padding:12px 4px;">暂无自定义原则。填写上方表单保存，或让主对话 Agent 直接在目录中创建。</div>`
+          : `
+        <div class="settings-item-list">
+          ${customPrinciples
+            .map(
+              (pr) => `
+            <div class="settings-item-row">
+              <div class="settings-item-main">
+                <div class="settings-item-title">
+                  <span>${esc(pr.titleZh)}</span>
+                  <span class="origin-tag">${esc(pr.shortSlug)}</span>
+                </div>
+                <div class="settings-card-sub">${esc(pr.summary)}</div>
+                <div class="settings-item-path">${esc(pr.sourceFilePath || pr.relPath)}</div>
+              </div>
+              <div class="settings-item-actions">
+                <button type="button" class="text-link" data-action="open-source" data-path="${esc(pr.relPath)}">查看原文</button>
+                <button type="button" class="btn-danger-link" data-action="delete-user-item" data-kind="principle" data-id="${esc(pr.id)}">删除</button>
+              </div>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      `
+      }
+    </section>
+  `;
+}
+
+function bindSettingsInputs() {
+  const bind = (id, key) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', (e) => {
+      state.settingsDraft[key] = e.target.value;
+    });
+    el.addEventListener('change', (e) => {
+      state.settingsDraft[key] = e.target.value;
+    });
+  };
+  bind('settings-playbook-idea', 'playbookIdea');
+  bind('settings-skill-dir-path', 'skillPath');
+  bind('settings-skill-dir-label', 'skillLabel');
+  bind('settings-skill-idea', 'skillIdea');
+  bind('settings-prin-title', 'prinTitleZh');
+  bind('settings-prin-slug', 'prinSlug');
+  bind('settings-prin-group', 'prinGroup');
+  bind('settings-prin-summary', 'prinSummary');
+}
+
+function buildAgentAuthoringPrompt(kind) {
+  const paths = state.catalog?.userPaths || {};
+  const knownSkills = (state.catalog?.skills || []).slice(0, 18).map((s) => s.slash).join('、');
+
+  if (kind === 'playbook') {
+    const idea = (state.settingsDraft.playbookIdea || '').trim() || '<请先向我确认要装配的流程目标、触发条件和关键步骤>';
+    return [
+      `请在 pstack Studio 用户自定义流程目录中新建一条 Playbook（切勿修改插件内置的 \`skills/poteto-mode/playbooks/\` 文件，以保持上游更新无冲突）：`,
+      ``,
+      `- 目标目录：\`${paths.playbooksDir || '~/.gemini/config/pstack-studio/playbooks'}\``,
+      `- 命名规范：\`<english-slug>.md\`（可选配对 \`<english-slug>.graph.json\` 定义分支/循环拓扑；若不写 \`.graph.json\`，插件会自动按编号步骤生成可点击流程图）。`,
+      `- Frontmatter 字段：\`titleZh\`、\`titleEn\`、\`scenario\`（\`debug|build|understand|design|verify|autopilot\`）、\`whenToUse\`、\`deliverable\`、\`builtinSkills\`、\`builtinPrinciples\`。`,
+      `- 正文规范：使用编号步骤 \`1. 标题：具体动作\`，可直接装配现有技能（如 ${knownSkills} 等），末尾附 \`**Reply:**\` 交付契约。`,
+      ``,
+      `流程需求：${idea}`,
+      ``,
+      `写完文件后告诉我文件路径，我在 pstack Studio 点击「刷新扫描」即可立即生效。`,
+    ].join('\n');
+  }
+
+  if (kind === 'skill') {
+    const idea = (state.settingsDraft.skillIdea || '').trim() || '<请先向我确认新技能的名称、触发场景和执行步骤>';
+    return [
+      `请在 pstack Studio 用户自定义技能目录中新建一个 Skill（切勿修改插件内置的 \`skills/\` 文件，以保持上游更新无冲突）：`,
+      ``,
+      `- 目标目录：\`${paths.skillsDir || '~/.gemini/config/pstack-studio/skills'}/<english-slug>/SKILL.md\``,
+      `- Frontmatter 字段：\`name\`、\`titleZh\`、\`titleEn\`、\`scenario\`（\`debug|build|understand|design|verify|autopilot\`）、\`description\`、\`whenToUse\`。`,
+      `- 如需导入已存在的外部技能文件夹，也可以告诉我文件夹路径，我直接在「设置 → 技能」里按路径挂载。`,
+      ``,
+      `技能需求：${idea}`,
+      ``,
+      `写完后告诉我文件路径，我在 pstack Studio 点击「刷新扫描」即可立即出现在技能列表与搭配区。`,
+    ].join('\n');
+  }
+
+  const titleHint = (state.settingsDraft.prinTitleZh || '').trim();
+  const sumHint = (state.settingsDraft.prinSummary || '').trim();
+  const idea =
+    titleHint || sumHint
+      ? `名称：${titleHint || '待定'}；准则要点：${sumHint || '待补充'}`
+      : '<请先向我确认原则名称、适用场景与核心约束>';
+  return [
+    `请在 pstack Studio 用户自定义原则目录中新建一条工程原则（切勿修改插件内置的 \`skills/principle-*\` 文件，以保持上游更新无冲突）：`,
+    ``,
+    `- 目标目录：\`${paths.principlesDir || '~/.gemini/config/pstack-studio/principles'}/<english-slug>.md\``,
+    `- Frontmatter 字段：\`name: principle-<slug>\`、\`titleZh\`、\`titleEn\`、\`group\`（\`core|architecture|verification|delegation|meta\`）、\`summary\`、\`description\`。`,
+    ``,
+    `原则需求：${idea}`,
+    ``,
+    `写完后告诉我文件路径，我在 pstack Studio 点击「刷新扫描」即可立即生效。`,
+  ].join('\n');
+}
+
+async function dispatchAuthoringPromptToChat(kind, copyOnly = false) {
+  const prompt = buildAgentAuthoringPrompt(kind);
+  if (copyOnly) {
+    await copyTextRaw(prompt, '已复制规范提示词，可粘贴到主对话让 Agent 执行');
+    return;
+  }
+  const convId = window.sidecar?.conversationId;
+  if (!convId || !window.sidecar?.agent?.sendMessage) {
+    await copyTextRaw(prompt, '未检测到关联对话，已复制规范提示词供粘贴');
+    return;
+  }
+  try {
+    await window.sidecar.agent.sendMessage(prompt, convId);
+    showToast(
+      window.sidecar.isStandalonePreview
+        ? '预览模式：已模拟发送新建任务到主对话'
+        : '已发送到主对话，Agent 写完文件后点击「刷新扫描」即可生效'
+    );
+  } catch (err) {
+    await copyTextRaw(prompt, `发送失败已改复制到剪贴板：${err.message}`);
+  }
+}
+
+async function persistUiSettings(patch) {
+  Object.assign(state, patch);
+  applyUiPreferences();
+  saveLocalUiPrefs({
+    themeMode: state.themeMode,
+    fontFamily: state.fontFamily,
+    fontSize: state.fontSize,
+  });
+  if (state.settingsOpen) renderSettingsRegion();
+  try {
+    const res = await apiFetch('/api/settings/ui', {
+      method: 'POST',
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.catalog) state.catalog = data.catalog;
+    }
+  } catch {
+    // Local fallback already applied
+  }
+}
+
+async function refreshCatalogLive(showFeedback = true) {
+  try {
+    const res = await apiFetch('/api/catalog', {
+      method: 'POST',
+      body: JSON.stringify({ force: true }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    state.catalog = await res.json();
+    if (state.catalog.usage) {
+      state.usage = state.catalog.usage;
+      saveLocalUsage(state.usage);
+    }
+    renderAll();
+    if (showFeedback) {
+      showToast(
+        `已重新扫描：${state.catalog.counts.playbooks} 条流程 · ${state.catalog.counts.skills} 个技能 · ${state.catalog.counts.principles} 条原则`
+      );
+    }
+  } catch (err) {
+    showToast(`刷新失败：${err.message}`, 3400);
+  }
+}
+
+async function handleAddSkillDir() {
+  const pathVal = (state.settingsDraft.skillPath || '').trim();
+  const labelVal = (state.settingsDraft.skillLabel || '').trim();
+  if (!pathVal) {
+    showToast('请先输入技能文件夹路径');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/settings/skill-dirs/add', {
+      method: 'POST',
+      body: JSON.stringify({ path: pathVal, label: labelVal }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '添加失败');
+    if (data.catalog) state.catalog = data.catalog;
+    state.settingsDraft.skillPath = '';
+    state.settingsDraft.skillLabel = '';
+    renderAll();
+    showToast(`已挂载目录，扫描到 ${data.discoveredCount || 0} 个技能`);
+  } catch (err) {
+    showToast(err.message, 3600);
+  }
+}
+
+async function handleRemoveSkillDir(dirPath) {
+  try {
+    const res = await apiFetch('/api/settings/skill-dirs/remove', {
+      method: 'POST',
+      body: JSON.stringify({ path: dirPath }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '移除失败');
+    if (data.catalog) state.catalog = data.catalog;
+    renderAll();
+    showToast('已移除外部技能目录');
+  } catch (err) {
+    showToast(err.message, 3400);
+  }
+}
+
+async function handleCreatePrinciple() {
+  const { prinTitleZh, prinSlug, prinGroup, prinSummary } = state.settingsDraft;
+  if (!prinTitleZh.trim()) {
+    showToast('请填写原则中文名称');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/settings/create-principle', {
+      method: 'POST',
+      body: JSON.stringify({
+        titleZh: prinTitleZh,
+        slug: prinSlug,
+        group: prinGroup,
+        summary: prinSummary,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '创建失败');
+    if (data.catalog) state.catalog = data.catalog;
+    state.settingsDraft.prinTitleZh = '';
+    state.settingsDraft.prinSlug = '';
+    state.settingsDraft.prinSummary = '';
+    renderAll();
+    showToast(`已新增自定义原则：${data.created?.id || prinTitleZh}`);
+  } catch (err) {
+    showToast(err.message, 3600);
+  }
+}
+
+async function handleDeleteUserItem(kind, id) {
+  try {
+    const res = await apiFetch('/api/settings/delete-item', {
+      method: 'POST',
+      body: JSON.stringify({ kind, id }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '删除失败');
+    if (data.catalog) state.catalog = data.catalog;
+    if (kind === 'playbook' && state.primary.type === 'playbook' && state.primary.id === id) {
+      state.primary = { type: 'playbook', id: 'bug-fix' };
+      resetMarkdownFromState();
+    } else if (kind === 'skill' && state.primary.type === 'skill' && state.primary.id === id) {
+      state.primary = { type: 'playbook', id: 'bug-fix' };
+      resetMarkdownFromState();
+    }
+    renderAll();
+    showToast('已删除自定义条目');
+  } catch (err) {
+    showToast(err.message, 3400);
+  }
+}
+
+async function handleResetUsage() {
+  state.usage = { presets: {}, playbooks: {}, skills: {}, principles: {} };
+  saveLocalUsage(state.usage);
+  try {
+    await apiFetch('/api/usage/reset', { method: 'POST', body: '{}' });
+  } catch {
+    // Non-fatal
+  }
+  renderAll();
+  showToast('已重置所有流程与技能使用计数');
 }
 
 // ---------------------------------------------------------------------------
@@ -1309,7 +2227,6 @@ function selectSkill(skillId) {
   if (!sk) return;
   state.selectedNavKey = `skill:${sk.id}`;
   state.viewingPrincipleId = null;
-  state.envPopoverOpen = false;
   state.primary = { type: 'skill', id: sk.id };
   state.activeNodeId = null;
   state.addonSkills = [];
@@ -1323,7 +2240,6 @@ function selectSkill(skillId) {
   state.doneCheck = '';
   resetMarkdownFromState();
   state.mobileDetailOpen = true;
-  renderEnvRegion();
   renderSidebarList();
   renderStageRegion();
   syncMobileClass();
@@ -1384,6 +2300,7 @@ async function copyTextRaw(text, okMsg) {
 async function copyPrompt() {
   const text = getEffectivePrompt();
   await copyTextRaw(text, '已复制指令，可粘贴到对话框并继续 @文件');
+  recordCurrentDispatchUsage();
 }
 
 async function sendToCurrentConversation() {
@@ -1404,7 +2321,7 @@ async function sendToCurrentConversation() {
     await window.sidecar.agent.sendMessage(text, convId);
     state.sending = false;
     state.lastEmptyWarnAt = 0;
-    renderStageRegion();
+    recordCurrentDispatchUsage();
     showToast(
       window.sidecar.isStandalonePreview
         ? '预览模式：已模拟发送到当前对话'
@@ -1440,7 +2357,7 @@ async function sendToNewConversation() {
 
     state.sending = false;
     state.lastEmptyWarnAt = 0;
-    renderStageRegion();
+    recordCurrentDispatchUsage();
 
     const newConvId =
       data?.conversationId ||
@@ -1463,10 +2380,6 @@ async function sendToNewConversation() {
 }
 
 function handleDelegatedClick(e) {
-  if (state.envPopoverOpen && !e.target.closest('#env-region')) {
-    state.envPopoverOpen = false;
-    renderEnvRegion();
-  }
   if (state.launchMenuOpen && !e.target.closest('#split-launch-wrap')) {
     state.launchMenuOpen = false;
     renderStageRegion();
@@ -1477,35 +2390,112 @@ function handleDelegatedClick(e) {
   const action = target.dataset.action;
 
   switch (action) {
-    case 'cycle-theme': {
-      const order = ['auto', 'light', 'dark'];
-      state.themeMode = order[(order.indexOf(state.themeMode) + 1) % order.length];
-      applyThemeAttr();
-      renderThemeButton();
+    case 'toggle-settings': {
+      state.settingsOpen = !state.settingsOpen;
+      syncSettingsVisibility();
+      if (state.settingsOpen) {
+        renderSettingsRegion();
+      } else {
+        void refreshCatalogLive(false);
+      }
       break;
     }
-    case 'toggle-env-popover': {
-      state.envPopoverOpen = !state.envPopoverOpen;
-      renderEnvRegion();
+    case 'switch-settings-tab': {
+      state.settingsTab = target.dataset.tab || 'general';
+      renderSettingsRegion();
       break;
     }
-    case 'clear-search': {
-      state.searchQuery = '';
-      const inp = document.getElementById('global-search');
-      if (inp) inp.value = '';
-      document.getElementById('search-kbd')?.classList.remove('hidden');
-      document.getElementById('search-clear')?.classList.add('hidden');
-      renderSidebarTabs();
-      renderSidebarList();
+    case 'set-theme-mode': {
+      const val = target.dataset.value;
+      if (['auto', 'light', 'dark'].includes(val)) {
+        void persistUiSettings({ themeMode: val });
+      }
+      break;
+    }
+    case 'set-font-family': {
+      const val = target.dataset.value;
+      if (FONT_OPTIONS.some((f) => f.id === val)) {
+        void persistUiSettings({ fontFamily: val });
+      }
+      break;
+    }
+    case 'set-font-size': {
+      const val = Number(target.dataset.value);
+      if (Number.isFinite(val)) {
+        void persistUiSettings({ fontSize: val });
+      }
+      break;
+    }
+    case 'reset-usage': {
+      void handleResetUsage();
+      break;
+    }
+    case 'refresh-catalog': {
+      void refreshCatalogLive(true);
+      break;
+    }
+    case 'add-skill-dir': {
+      void handleAddSkillDir();
+      break;
+    }
+    case 'remove-skill-dir': {
+      void handleRemoveSkillDir(target.dataset.path || '');
+      break;
+    }
+    case 'create-principle': {
+      void handleCreatePrinciple();
+      break;
+    }
+    case 'delete-user-item': {
+      void handleDeleteUserItem(target.dataset.kind, target.dataset.id);
+      break;
+    }
+    case 'agent-create-playbook': {
+      void dispatchAuthoringPromptToChat('playbook', false);
+      break;
+    }
+    case 'copy-agent-create-playbook': {
+      void dispatchAuthoringPromptToChat('playbook', true);
+      break;
+    }
+    case 'agent-create-skill': {
+      void dispatchAuthoringPromptToChat('skill', false);
+      break;
+    }
+    case 'copy-agent-create-skill': {
+      void dispatchAuthoringPromptToChat('skill', true);
+      break;
+    }
+    case 'agent-create-principle': {
+      void dispatchAuthoringPromptToChat('principle', false);
+      break;
+    }
+    case 'copy-agent-create-principle': {
+      void dispatchAuthoringPromptToChat('principle', true);
+      break;
+    }
+    case 'copy-path': {
+      void copyTextRaw(target.dataset.path || '', '已复制目录路径');
+      break;
+    }
+    case 'open-item-from-settings': {
+      const kind = target.dataset.kind;
+      const id = target.dataset.id;
+      state.settingsOpen = false;
+      syncSettingsVisibility();
+      if (kind === 'playbook') {
+        state.sidebarTab = 'playbooks';
+        renderSidebarTabs();
+        selectPlaybook(id);
+      } else if (kind === 'skill') {
+        state.sidebarTab = 'skills';
+        renderSidebarTabs();
+        selectSkill(id);
+      }
       break;
     }
     case 'switch-sidebar-tab': {
       state.sidebarTab = target.dataset.tab;
-      state.searchQuery = '';
-      const inp = document.getElementById('global-search');
-      if (inp) inp.value = '';
-      document.getElementById('search-kbd')?.classList.remove('hidden');
-      document.getElementById('search-clear')?.classList.add('hidden');
       renderSidebarTabs();
       renderSidebarList();
       break;
@@ -1818,26 +2808,14 @@ function handleDelegatedClick(e) {
 }
 
 function handleGlobalKeydown(e) {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-    e.preventDefault();
-    document.getElementById('global-search')?.focus();
-    return;
-  }
   if (e.key === 'Escape') {
     if (state.modal) {
       state.modal = null;
       renderModalRegion();
-    } else if (state.envPopoverOpen) {
-      state.envPopoverOpen = false;
-      renderEnvRegion();
-    } else if (state.searchQuery) {
-      state.searchQuery = '';
-      const inp = document.getElementById('global-search');
-      if (inp) inp.value = '';
-      document.getElementById('search-kbd')?.classList.remove('hidden');
-      document.getElementById('search-clear')?.classList.add('hidden');
-      renderSidebarTabs();
-      renderSidebarList();
+    } else if (state.settingsOpen) {
+      state.settingsOpen = false;
+      syncSettingsVisibility();
+      void refreshCatalogLive(false);
     }
   }
 }
@@ -1854,7 +2832,6 @@ async function refreshHealth(workspaceUris) {
     });
     if (res.ok) {
       state.health = await res.json();
-      renderEnvRegion();
     }
   } catch {
     // Non-fatal
@@ -1879,7 +2856,7 @@ async function init() {
       requestAnimationFrame(applyThemeAttr);
     }
   });
-  applyThemeAttr();
+  applyUiPreferences();
 
   try {
     const res = await apiFetch('/api/catalog', { method: 'POST', body: '{}' });
@@ -1891,6 +2868,22 @@ async function init() {
       root.innerHTML = `<div class="empty-list">加载失败：${esc(err.message)}</div>`;
     }
     return;
+  }
+
+  // Hydrate persisted UI preferences & usage counters from user store
+  if (state.catalog?.settings?.ui) {
+    state.themeMode = state.catalog.settings.ui.themeMode || state.themeMode;
+    state.fontFamily = state.catalog.settings.ui.fontFamily || state.fontFamily;
+    state.fontSize = state.catalog.settings.ui.fontSize || state.fontSize;
+    saveLocalUiPrefs({
+      themeMode: state.themeMode,
+      fontFamily: state.fontFamily,
+      fontSize: state.fontSize,
+    });
+  }
+  if (state.catalog?.usage) {
+    state.usage = state.catalog.usage;
+    saveLocalUsage(state.usage);
   }
 
   mountShell();
