@@ -1573,6 +1573,455 @@ button.mount-pill:hover {
   line-height: 1.38;
 }
 
+/* Reusable Collapsible Developer Tribute Plaque (Colophon) */
+.tribute-plaque {
+  position: relative;
+  border-radius: 14px;
+  border: 1.5px solid transparent;
+  overflow: hidden;
+  transition: transform 160ms ease, box-shadow 180ms ease;
+}
+
+.tribute-plaque.plaque-poteto {
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(99, 102, 241, 0.14), transparent 52%),
+    radial-gradient(100% 130% at 100% 0%, rgba(236, 72, 153, 0.13), transparent 50%),
+    radial-gradient(90% 120% at 55% 110%, rgba(245, 158, 11, 0.12), transparent 55%),
+    linear-gradient(var(--ps-card), var(--ps-card)) padding-box,
+    linear-gradient(125deg, #6366f1 0%, #a855f7 34%, #ec4899 68%, #f59e0b 100%) border-box;
+  background-origin: padding-box, padding-box, padding-box, padding-box, border-box;
+  background-clip: padding-box, padding-box, padding-box, padding-box, border-box;
+  box-shadow: 0 6px 22px -10px rgba(139, 92, 246, 0.26);
+}
+
+:root[data-theme="dark"] .tribute-plaque.plaque-poteto {
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(99, 102, 241, 0.24), transparent 54%),
+    radial-gradient(100% 130% at 100% 0%, rgba(236, 72, 153, 0.2), transparent 52%),
+    radial-gradient(90% 120% at 55% 110%, rgba(245, 158, 11, 0.16), transparent 55%),
+    linear-gradient(#151822, #151822) padding-box,
+    linear-gradient(125deg, #818cf8 0%, #c084fc 34%, #f472b6 68%, #fbbf24 100%) border-box;
+  background-origin: padding-box, padding-box, padding-box, padding-box, border-box;
+  background-clip: padding-box, padding-box, padding-box, padding-box, border-box;
+  box-shadow: 0 8px 26px -10px rgba(129, 140, 248, 0.34);
+}
+
+.tribute-plaque.plaque-custom {
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(16, 185, 129, 0.14), transparent 54%),
+    radial-gradient(100% 130% at 100% 0%, rgba(6, 182, 212, 0.13), transparent 52%),
+    radial-gradient(90% 120% at 60% 110%, rgba(59, 130, 246, 0.12), transparent 55%),
+    linear-gradient(var(--ps-card), var(--ps-card)) padding-box,
+    linear-gradient(125deg, #10b981 0%, #06b6d4 45%, #3b82f6 80%, #6366f1 100%) border-box;
+  background-origin: padding-box, padding-box, padding-box, padding-box, border-box;
+  background-clip: padding-box, padding-box, padding-box, padding-box, border-box;
+  box-shadow: 0 6px 22px -10px rgba(6, 182, 212, 0.24);
+}
+
+:root[data-theme="dark"] .tribute-plaque.plaque-custom {
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(16, 185, 129, 0.22), transparent 54%),
+    radial-gradient(100% 130% at 100% 0%, rgba(6, 182, 212, 0.2), transparent 52%),
+    radial-gradient(90% 120% at 60% 110%, rgba(59, 130, 246, 0.18), transparent 55%),
+    linear-gradient(#131a1f, #131a1f) padding-box,
+    linear-gradient(125deg, #34d399 0%, #22d3ee 45%, #60a5fa 80%, #818cf8 100%) border-box;
+  background-origin: padding-box, padding-box, padding-box, padding-box, border-box;
+  background-clip: padding-box, padding-box, padding-box, padding-box, border-box;
+  box-shadow: 0 8px 26px -10px rgba(34, 211, 238, 0.3);
+}
+
+.plaque-header {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tribute-plaque.plaque-collapsed .plaque-header {
+  padding: 9px 14px;
+}
+
+.plaque-header-left {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  flex: 1;
+}
+
+.plaque-emblem {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 48%, #ec4899 100%);
+  box-shadow: 0 4px 12px -2px rgba(168, 85, 247, 0.45);
+}
+
+.plaque-custom .plaque-emblem {
+  background: linear-gradient(135deg, #10b981 0%, #06b6d4 52%, #3b82f6 100%);
+  box-shadow: 0 4px 12px -2px rgba(6, 182, 212, 0.45);
+}
+
+.tribute-plaque.plaque-collapsed .plaque-emblem {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+.plaque-emblem svg {
+  width: 18px;
+  height: 18px;
+}
+
+.tribute-plaque.plaque-collapsed .plaque-emblem svg {
+  width: 13px;
+  height: 13px;
+}
+
+.plaque-identity {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.plaque-kicker {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: linear-gradient(95deg, #4f46e5, #db2777, #d97706);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+:root[data-theme="dark"] .plaque-kicker {
+  background: linear-gradient(95deg, #a5b4fc, #f472b6, #fcd34d);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.plaque-custom .plaque-kicker {
+  background: linear-gradient(95deg, #059669, #0891b2, #2563eb);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+:root[data-theme="dark"] .plaque-custom .plaque-kicker {
+  background: linear-gradient(95deg, #6ee7b7, #67e8f9, #93c5fd);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.plaque-name {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--ps-fg);
+  letter-spacing: -0.01em;
+}
+
+.plaque-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--ps-mono);
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 2px 9px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.14);
+  border: 1px solid rgba(99, 102, 241, 0.32);
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+a.plaque-handle {
+  cursor: pointer;
+}
+
+a.plaque-handle:hover {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: #6366f1;
+  box-shadow: 0 2px 8px -2px rgba(99, 102, 241, 0.4);
+  transform: translateY(-0.5px);
+}
+
+:root[data-theme="dark"] .plaque-handle {
+  color: #c7d2fe;
+  background: rgba(129, 140, 248, 0.22);
+  border-color: rgba(165, 180, 252, 0.38);
+}
+
+:root[data-theme="dark"] a.plaque-handle:hover {
+  background: rgba(129, 140, 248, 0.34);
+  border-color: #a5b4fc;
+}
+
+.plaque-custom .plaque-handle {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.32);
+}
+
+.plaque-custom a.plaque-handle:hover {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: #10b981;
+  box-shadow: 0 2px 8px -2px rgba(16, 185, 129, 0.38);
+}
+
+:root[data-theme="dark"] .plaque-custom .plaque-handle {
+  color: #a7f3d0;
+  background: rgba(52, 211, 153, 0.2);
+  border-color: rgba(110, 231, 183, 0.38);
+}
+
+:root[data-theme="dark"] .plaque-custom a.plaque-handle:hover {
+  background: rgba(52, 211, 153, 0.32);
+  border-color: #6ee7b7;
+}
+
+.plaque-pack-tag {
+  font-size: 0.76rem;
+  font-weight: 650;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: #be185d;
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.14), rgba(245, 158, 11, 0.14));
+  border: 1px solid rgba(236, 72, 153, 0.28);
+}
+
+:root[data-theme="dark"] .plaque-pack-tag {
+  color: #fbcfe8;
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.22), rgba(245, 158, 11, 0.2));
+  border-color: rgba(244, 114, 182, 0.36);
+}
+
+.plaque-custom .plaque-pack-tag {
+  color: #0369a1;
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.14), rgba(59, 130, 246, 0.14));
+  border-color: rgba(6, 182, 212, 0.28);
+}
+
+:root[data-theme="dark"] .plaque-custom .plaque-pack-tag {
+  color: #bae6fd;
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.22), rgba(59, 130, 246, 0.2));
+  border-color: rgba(103, 232, 249, 0.34);
+}
+
+.plaque-mini-quote {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--ps-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+.plaque-toggle-pill {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ps-fg-2);
+  background: color-mix(in srgb, var(--ps-card) 75%, transparent);
+  border: 1px solid var(--ps-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.plaque-header:hover .plaque-toggle-pill {
+  background: var(--ps-card);
+  color: var(--ps-fg);
+}
+
+.plaque-body {
+  padding: 0 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.plaque-quote-box {
+  position: relative;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ps-card) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ps-fg) 8%, transparent);
+  border-left: 3px solid #a855f7;
+}
+
+.plaque-custom .plaque-quote-box {
+  border-left-color: #06b6d4;
+}
+
+.plaque-quote-en {
+  font-size: 0.94rem;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--ps-fg);
+  line-height: 1.45;
+}
+
+.plaque-quote-zh {
+  margin-top: 3px;
+  font-size: 0.84rem;
+  color: var(--ps-fg-2);
+  line-height: 1.5;
+}
+
+.plaque-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--ps-muted);
+}
+
+.plaque-meta-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.plaque-meta-counts {
+  font-family: var(--ps-mono);
+  font-size: 0.76rem;
+  color: var(--ps-muted);
+}
+
+.plaque-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.plaque-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.76rem;
+  font-weight: 580;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+a.plaque-chip:hover {
+  filter: brightness(0.95);
+  transform: translateY(-0.5px);
+}
+
+.plaque-chip-indigo {
+  color: #4338ca;
+  background: rgba(99, 102, 241, 0.11);
+  border-color: rgba(99, 102, 241, 0.24);
+}
+
+.plaque-chip-rose {
+  color: #be185d;
+  background: rgba(236, 72, 153, 0.1);
+  border-color: rgba(236, 72, 153, 0.24);
+}
+
+.plaque-chip-amber {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.plaque-chip-cyan {
+  color: #0e7490;
+  background: rgba(6, 182, 212, 0.11);
+  border-color: rgba(6, 182, 212, 0.25);
+}
+
+:root[data-theme="dark"] .plaque-chip-indigo {
+  color: #c7d2fe;
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(129, 140, 248, 0.32);
+}
+
+:root[data-theme="dark"] .plaque-chip-rose {
+  color: #fbcfe8;
+  background: rgba(236, 72, 153, 0.2);
+  border-color: rgba(244, 114, 182, 0.32);
+}
+
+:root[data-theme="dark"] .plaque-chip-amber {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+:root[data-theme="dark"] .plaque-chip-cyan {
+  color: #a5f3fc;
+  background: rgba(6, 182, 212, 0.2);
+  border-color: rgba(34, 211, 238, 0.3);
+}
+
+.plaque-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px dashed color-mix(in srgb, var(--ps-fg) 10%, transparent);
+  font-size: 0.8rem;
+  color: var(--ps-muted);
+}
+
+.plaque-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.plaque-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--ps-mono);
+  font-size: 0.78rem;
+  font-weight: 560;
+  color: var(--ps-fg-2);
+  text-decoration: none;
+  border: 1px solid var(--ps-line);
+  background: color-mix(in srgb, var(--ps-card) 82%, transparent);
+  padding: 2px 8px;
+  border-radius: 6px;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.plaque-link-btn:hover {
+  border-color: var(--ps-accent-border);
+  color: var(--ps-accent);
+}
+
 /* Source Modal */
 .modal-backdrop {
   position: fixed;

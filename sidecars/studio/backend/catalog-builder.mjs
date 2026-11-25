@@ -222,6 +222,43 @@ const PRINCIPLE_GROUP_LABELS = {
   meta: '元原则 Meta',
 };
 
+export const POTETO_ATTRIBUTION = {
+  theme: 'poteto',
+  author: 'poteto',
+  authorName: 'Lauren Tan',
+  pack: 'Cursor pstack',
+  roleZh: '原版方法论作者',
+  quote: 'If you want to go fast, go deep first.',
+  quoteZh: '欲速则先深耕——目标不是写更多代码，而是写更少、更高质量、经得起验证的代码。',
+  repoLabel: 'cursor/plugins · pstack',
+  repoUrl: 'https://github.com/cursor/plugins/tree/main/pstack',
+  portBy: 'ahmetdotsh',
+  portLabel: 'agy-pstack (Antigravity 原生适配)',
+  portUrl: 'https://github.com/ahmetdotsh/agy-pstack',
+};
+
+function buildCustomAttribution(attributes = {}) {
+  const author = String(attributes.author || 'custom').trim().replace(/^@/, '');
+  const authorName = String(attributes.authorName || author || '本地作者').trim();
+  const pack = String(attributes.pack || 'Custom Flow').trim();
+  const quote = String(attributes.quote || '').trim();
+  const repoUrl = String(attributes.authorUrl || attributes.repoUrl || '').trim();
+  return {
+    theme: 'custom',
+    author,
+    authorName,
+    pack,
+    roleZh: '自定义流程作者',
+    quote,
+    quoteZh: quote ? '' : '存放在本地独立用户目录，持续跟随上游内置技能演进且零合并冲突。',
+    repoLabel: repoUrl || '~/.gemini/config/pstack-studio/playbooks',
+    repoUrl,
+    portBy: 'poteto',
+    portLabel: '基于 Cursor pstack 引擎装配',
+    portUrl: 'https://github.com/cursor/plugins/tree/main/pstack',
+  };
+}
+
 function parseCsvAttr(val) {
   if (!val) return [];
   return String(val)
@@ -418,6 +455,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       relPath,
       sourceFilePath: absPath,
       origin: 'builtin',
+      attribution: POTETO_ATTRIBUTION,
     };
   });
 
@@ -547,6 +585,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       relPath,
       sourceFilePath: absPath,
       origin: 'builtin',
+      attribution: POTETO_ATTRIBUTION,
     };
   });
 
@@ -626,6 +665,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
         relPath: `user:playbooks/${filename}`,
         sourceFilePath: absPath,
         origin: 'custom',
+        attribution: buildCustomAttribution(attributes),
       });
     }
   }
@@ -663,9 +703,10 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
     plugin: {
       name: pluginManifest.name || 'pstack',
       displayName: pluginManifest.displayName || 'pstack',
-      version: pluginManifest.version || '1.2.0',
+      version: pluginManifest.version || '1.3.0',
       description: pluginManifest.description || '',
       rootPath: pluginRoot,
+      defaultAttribution: POTETO_ATTRIBUTION,
     },
     counts: {
       playbooks: playbooks.length,

@@ -409,6 +409,9 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
       '---',
       'titleZh: 发布前检查',
       'titleEn: Release Gate',
+      'author: alice',
+      'authorName: Alice Chen',
+      'pack: Team Backend',
       'scenario: verify',
       'whenToUse: 合并高风险变更前执行门禁检查',
       'deliverable: 影响面清单与实测结论',
@@ -478,6 +481,13 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
 
     const customPb = cat.playbooks.find((p) => p.id === 'release-gate');
     assert.ok(customPb && customPb.origin === 'custom');
+    assert.equal(customPb.attribution.author, 'alice');
+    assert.equal(customPb.attribution.pack, 'Team Backend');
+    assert.equal(customPb.attribution.theme, 'custom');
+    const builtinPb = cat.playbooks.find((p) => p.id === 'bug-fix');
+    assert.equal(builtinPb.attribution.author, 'poteto');
+    assert.equal(builtinPb.attribution.pack, 'Cursor pstack');
+    assert.equal(builtinPb.attribution.theme, 'poteto');
     assert.ok(customPb.graph && customPb.graph.rows.length === 2);
     assert.match(renderFlowchartSvg(customPb.graph), /^<svg/);
 
