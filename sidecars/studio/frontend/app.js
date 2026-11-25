@@ -173,9 +173,8 @@ const state = {
   },
   usage: loadLocalUsage(),
 
-  // Master list state
-  sidebarTab: 'presets', // 'presets' | 'playbooks' | 'skills' | 'principles'
-  selectedNavKey: 'preset:scientific-bug-fix',
+  // Master list state (Playbooks only, usage-ranked)
+  selectedNavKey: 'playbook:bug-fix',
   viewingPrincipleId: null,
   mobileDetailOpen: false,
 
@@ -293,15 +292,6 @@ function getPrincipleUsage(id) {
   return Number(state.usage?.principles?.[id] || 0);
 }
 
-function getPresetUsage(recipe) {
-  if (!recipe) return 0;
-  const direct = Number(state.usage?.presets?.[recipe.id] || 0);
-  if (direct > 0) return direct;
-  if (recipe.primary?.type === 'playbook') return getPlaybookUsage(recipe.primary.id);
-  if (recipe.primary?.type === 'skill') return getSkillUsage(recipe.primary.id);
-  return 0;
-}
-
 function sortByUsageDesc(items, scoreFn) {
   return items
     .map((item, idx) => ({ item, idx, score: scoreFn(item) }))
@@ -310,9 +300,6 @@ function sortByUsageDesc(items, scoreFn) {
 }
 
 function recordCurrentDispatchUsage() {
-  const presetId = state.selectedNavKey?.startsWith('preset:')
-    ? state.selectedNavKey.slice('preset:'.length)
-    : '';
   const playbookId = state.primary.type === 'playbook' ? state.primary.id : '';
   const skillIds = [
     ...(state.primary.type === 'skill' ? [state.primary.id] : []),
@@ -321,9 +308,6 @@ function recordCurrentDispatchUsage() {
   const principleIds = [...state.principles];
 
   // Optimistic update for immediate sorting feedback
-  if (presetId) {
-    state.usage.presets[presetId] = (state.usage.presets[presetId] || 0) + 1;
-  }
   if (playbookId) {
     state.usage.playbooks[playbookId] = (state.usage.playbooks[playbookId] || 0) + 1;
   }
@@ -340,7 +324,7 @@ function recordCurrentDispatchUsage() {
 
   void apiFetch('/api/usage/record', {
     method: 'POST',
-    body: JSON.stringify({ presetId, playbookId, skillIds, principleIds }),
+    body: JSON.stringify({ playbookId, skillIds, principleIds }),
   })
     .then((res) => (res.ok ? res.json() : null))
     .then((data) => {
@@ -440,7 +424,6 @@ function mountShell() {
 
     <div id="workspace-grid" class="workspace">
       <aside class="sidebar">
-        <div id="sidebar-tabs" class="sidebar-tabs" role="tablist"></div>
         <div id="sidebar-list" class="nav-list"></div>
       </aside>
 
@@ -477,7 +460,6 @@ function syncSettingsVisibility() {
 function renderAll() {
   applyUiPreferences();
   syncSettingsVisibility();
-  renderSidebarTabs();
   renderSidebarList();
   renderStageRegion();
   if (state.settingsOpen) {
@@ -488,46 +470,13 @@ function renderAll() {
 }
 
 // ---------------------------------------------------------------------------
-// Left Sidebar Rendering (Usage-Frequency Ranked)
+// Left Sidebar Rendering (Playbooks Only, Usage-Frequency Ranked)
 // ---------------------------------------------------------------------------
-
-function renderSidebarTabs() {
-  const el = document.getElementById('sidebar-tabs');
-  if (!el || !state.catalog) return;
-  const counts = state.catalog.counts || {};
-  const tabs = [
-    { id: 'presets', label: '常用' },
-    { id: 'playbooks', label: `流程 (${counts.playbooks ?? state.catalog.playbooks.length})` },
-    { id: 'skills', label: `技能 (${counts.skills ?? state.catalog.skills.length})` },
-    { id: 'principles', label: `原则 (${counts.principles ?? state.catalog.principles.length})` },
-  ];
-  el.innerHTML = tabs
-    .map(
-      (t) => `
-      <button
-        type="button"
-        class="s-tab ${state.sidebarTab === t.id ? 'active' : ''}"
-        data-action="switch-sidebar-tab"
-        data-tab="${t.id}"
-      >${esc(t.label)}</button>
-    `
-    )
-    .join('');
-}
 
 function renderSidebarList() {
   const el = document.getElementById('sidebar-list');
   if (!el || !state.catalog) return;
-
-  if (state.sidebarTab === 'presets') {
-    el.innerHTML = renderGroupedPresets();
-  } else if (state.sidebarTab === 'playbooks') {
-    el.innerHTML = renderGroupedPlaybooks();
-  } else if (state.sidebarTab === 'skills') {
-    el.innerHTML = renderGroupedSkills();
-  } else {
-    el.innerHTML = renderGroupedPrinciples();
-  }
+  el.innerHTML = renderGroupedPlaybooks();
 }
 
 function renderNavRow({ navKey, action, id, title, enLabel, active, usageCount = 0, origin = '' }) {
@@ -563,58 +512,6 @@ function renderNavRow({ navKey, action, id, title, enLabel, active, usageCount =
   `;
 }
 
-function renderGroupedPresets() {
-  const cat = state.catalog;
-  const order = ['debug', 'build', 'understand', 'verify', 'design', 'autopilot'];
-  const chunks = [];
-
-  const used = sortByUsageDesc(
-    cat.recipes.filter((r) => getPresetUsage(r) > 0),
-    (r) => getPresetUsage(r)
-  );
-  const usedIds = new Set(used.map((r) => r.id));
-
-  if (used.length > 0) {
-    chunks.push(`<div class="group-heading">高频使用 · 按次数排序</div>`);
-    for (const r of used) {
-      const enLabel = r.titleEn || (r.primary.type === 'playbook' ? r.primary.id : `/${r.primary.id}`);
-      const navKey = `preset:${r.id}`;
-      chunks.push(
-        renderNavRow({
-          navKey,
-          action: 'select-preset',
-          id: r.id,
-          title: r.title,
-          enLabel,
-          usageCount: getPresetUsage(r),
-          active: state.selectedNavKey === navKey && !state.viewingPrincipleId,
-        })
-      );
-    }
-  }
-
-  for (const scId of order) {
-    const items = cat.recipes.filter((r) => r.scenario === scId && !usedIds.has(r.id));
-    if (items.length === 0) continue;
-    chunks.push(`<div class="group-heading">${esc(findScenarioTitle(scId))}</div>`);
-    for (const r of items) {
-      const enLabel = r.titleEn || (r.primary.type === 'playbook' ? r.primary.id : `/${r.primary.id}`);
-      const navKey = `preset:${r.id}`;
-      chunks.push(
-        renderNavRow({
-          navKey,
-          action: 'select-preset',
-          id: r.id,
-          title: r.title,
-          enLabel,
-          active: state.selectedNavKey === navKey && !state.viewingPrincipleId,
-        })
-      );
-    }
-  }
-  return chunks.join('');
-}
-
 function renderGroupedPlaybooks() {
   const cat = state.catalog;
   const order = ['debug', 'build', 'understand', 'design', 'verify', 'autopilot'];
@@ -624,8 +521,8 @@ function renderGroupedPlaybooks() {
     const navKey = `playbook:${pb.id}`;
     const isSelected =
       !state.viewingPrincipleId &&
-      (state.selectedNavKey === navKey ||
-        (state.primary.type === 'playbook' && state.primary.id === pb.id && state.sidebarTab === 'playbooks'));
+      state.primary.type === 'playbook' &&
+      state.primary.id === pb.id;
     return renderNavRow({
       navKey,
       action: 'select-playbook',
@@ -662,110 +559,6 @@ function renderGroupedPlaybooks() {
     if (items.length === 0) continue;
     chunks.push(`<div class="group-heading">${esc(findScenarioTitle(scId))}</div>`);
     for (const pb of items) chunks.push(renderPb(pb));
-  }
-  return chunks.join('');
-}
-
-function renderGroupedSkills() {
-  const cat = state.catalog;
-  const order = ['understand', 'design', 'debug', 'build', 'verify', 'autopilot'];
-  const chunks = [];
-
-  const renderSk = (sk) => {
-    const navKey = `skill:${sk.id}`;
-    const isSelected =
-      !state.viewingPrincipleId &&
-      (state.selectedNavKey === navKey ||
-        (state.primary.type === 'skill' && state.primary.id === sk.id && state.sidebarTab === 'skills'));
-    return renderNavRow({
-      navKey,
-      action: 'select-skill',
-      id: sk.id,
-      title: sk.titleZh,
-      enLabel: sk.slash,
-      usageCount: getSkillUsage(sk.id),
-      origin: sk.origin === 'custom' || sk.origin === 'external' ? sk.origin : '',
-      active: isSelected,
-    });
-  };
-
-  const used = sortByUsageDesc(
-    cat.skills.filter((s) => getSkillUsage(s.id) > 0),
-    (s) => getSkillUsage(s.id)
-  );
-  const usedIds = new Set(used.map((s) => s.id));
-
-  if (used.length > 0) {
-    chunks.push(`<div class="group-heading">高频使用 · 按次数排序</div>`);
-    for (const sk of used) chunks.push(renderSk(sk));
-  }
-
-  const unusedCustom = cat.skills.filter(
-    (s) => (s.origin === 'custom' || s.origin === 'external') && !usedIds.has(s.id)
-  );
-  if (unusedCustom.length > 0) {
-    chunks.push(`<div class="group-heading">扩展技能 Custom / External</div>`);
-    for (const sk of unusedCustom) chunks.push(renderSk(sk));
-  }
-
-  for (const scId of order) {
-    const items = cat.skills.filter(
-      (s) => s.origin === 'builtin' && s.scenario === scId && !usedIds.has(s.id)
-    );
-    if (items.length === 0) continue;
-    chunks.push(`<div class="group-heading">${esc(findScenarioTitle(scId))}</div>`);
-    for (const sk of items) chunks.push(renderSk(sk));
-  }
-  return chunks.join('');
-}
-
-function renderGroupedPrinciples() {
-  const groups = [
-    { id: 'core', label: '核心原则 Core' },
-    { id: 'architecture', label: '架构原则 Architecture' },
-    { id: 'verification', label: '验证原则 Verification' },
-    { id: 'delegation', label: '协同原则 Delegation' },
-    { id: 'meta', label: '元原则 Meta' },
-  ];
-  const chunks = [];
-
-  const renderPr = (pr) => {
-    const pinned = state.principles.includes(pr.id);
-    return renderNavRow({
-      navKey: `principle:${pr.id}`,
-      action: 'inspect-principle',
-      id: pr.id,
-      title: `${pinned ? '✓ ' : ''}${pr.titleZh}`,
-      enLabel: pr.titleEn || pr.shortSlug,
-      usageCount: getPrincipleUsage(pr.id),
-      origin: pr.origin === 'custom' ? 'custom' : '',
-      active: state.viewingPrincipleId === pr.id,
-    });
-  };
-
-  const used = sortByUsageDesc(
-    state.catalog.principles.filter((p) => getPrincipleUsage(p.id) > 0),
-    (p) => getPrincipleUsage(p.id)
-  );
-  const usedIds = new Set(used.map((p) => p.id));
-  if (used.length > 0) {
-    chunks.push(`<div class="group-heading">高频使用 · 按次数排序</div>`);
-    for (const pr of used) chunks.push(renderPr(pr));
-  }
-
-  const unusedCustom = state.catalog.principles.filter((p) => p.origin === 'custom' && !usedIds.has(p.id));
-  if (unusedCustom.length > 0) {
-    chunks.push(`<div class="group-heading">自定义原则 Custom</div>`);
-    for (const pr of unusedCustom) chunks.push(renderPr(pr));
-  }
-
-  for (const g of groups) {
-    const items = state.catalog.principles.filter(
-      (p) => p.origin !== 'custom' && p.group === g.id && !usedIds.has(p.id)
-    );
-    if (items.length === 0) continue;
-    chunks.push(`<div class="group-heading">${esc(g.label)}</div>`);
-    for (const pr of items) chunks.push(renderPr(pr));
   }
   return chunks.join('');
 }
@@ -1434,7 +1227,6 @@ function renderSettingsGeneralTab() {
   ];
   const pbTotal = sumCountMap(state.usage?.playbooks);
   const skTotal = sumCountMap(state.usage?.skills);
-  const presetTotal = sumCountMap(state.usage?.presets);
 
   return `
     <div class="settings-header">
@@ -1510,7 +1302,7 @@ function renderSettingsGeneralTab() {
       <div class="settings-card-head">
         <div>
           <h2 class="settings-card-title">使用频次排序统计</h2>
-          <p class="settings-card-sub">每次发送或复制指令时自动记录流程与技能使用次数，高频条目会自动排在左侧目录与右侧搭配选项最前方。</p>
+          <p class="settings-card-sub">每次发送或复制指令时自动记录流程与技能使用次数，高频条目会自动排在左侧流程列表与右侧搭配选项最前方。</p>
         </div>
         <button type="button" class="btn btn-ghost" data-action="reset-usage">重置所有计数</button>
       </div>
@@ -1522,10 +1314,6 @@ function renderSettingsGeneralTab() {
         <div class="settings-stat-box">
           <div class="settings-stat-num">${skTotal}</div>
           <div class="settings-stat-label">技能累计调用</div>
-        </div>
-        <div class="settings-stat-box">
-          <div class="settings-stat-num">${presetTotal}</div>
-          <div class="settings-stat-label">常用组合累计</div>
         </div>
       </div>
     </section>
@@ -2178,41 +1966,31 @@ function toggleArrayItem(arr, val) {
   else arr.push(val);
 }
 
-function selectPreset(recipeId) {
-  const r = state.catalog.recipes.find((x) => x.id === recipeId);
-  if (!r) return;
-  state.selectedNavKey = `preset:${r.id}`;
-  state.viewingPrincipleId = null;
-  state.primary = { ...r.primary };
-  state.activeNodeId = null;
-  state.addonSkills = [...r.addonSkills];
-  state.principles = [...r.principles];
-  state.constraints = [...r.constraints];
-  state.nativeModifiers = [...r.nativeModifiers];
-  state.goalPlaceholder = r.goalPlaceholder || '';
-  state.doneCheckPlaceholder = r.doneCheckPlaceholder || '';
-  state.doneCheck = '';
-  resetMarkdownFromState();
-  state.mobileDetailOpen = true;
-  renderSidebarList();
-  renderStageRegion();
-  syncMobileClass();
-  document.getElementById('stage-scroll')?.scrollTo({ top: 0 });
-}
-
 function selectPlaybook(playbookId) {
   const pb = findPlaybook(playbookId);
   if (!pb) return;
+  const matchedRecipe = (state.catalog?.recipes || []).find(
+    (r) => r.primary?.type === 'playbook' && r.primary?.id === pb.id
+  );
   state.selectedNavKey = `playbook:${pb.id}`;
   state.viewingPrincipleId = null;
   state.primary = { type: 'playbook', id: pb.id };
   state.activeNodeId = null;
-  state.addonSkills = [];
-  state.principles = pb.builtinPrinciples.slice(0, 1);
-  state.constraints = pb.intensity === 'light' && pb.id === 'investigation' ? ['read-only'] : [];
-  state.nativeModifiers = [];
-  state.goalPlaceholder = `描述「${pb.titleZh}」的具体目标、问题现象或涉及模块…`;
-  state.doneCheckPlaceholder = pb.deliverable;
+  if (matchedRecipe) {
+    state.addonSkills = [...matchedRecipe.addonSkills];
+    state.principles = [...matchedRecipe.principles];
+    state.constraints = [...matchedRecipe.constraints];
+    state.nativeModifiers = [...matchedRecipe.nativeModifiers];
+    state.goalPlaceholder = matchedRecipe.goalPlaceholder || `描述「${pb.titleZh}」的具体目标、问题现象或涉及模块…`;
+    state.doneCheckPlaceholder = matchedRecipe.doneCheckPlaceholder || pb.deliverable;
+  } else {
+    state.addonSkills = [];
+    state.principles = pb.builtinPrinciples.slice(0, 1);
+    state.constraints = pb.intensity === 'light' && pb.id === 'investigation' ? ['read-only'] : [];
+    state.nativeModifiers = [];
+    state.goalPlaceholder = `描述「${pb.titleZh}」的具体目标、问题现象或涉及模块…`;
+    state.doneCheckPlaceholder = pb.deliverable;
+  }
   state.doneCheck = '';
   resetMarkdownFromState();
   state.mobileDetailOpen = true;
@@ -2484,24 +2262,10 @@ function handleDelegatedClick(e) {
       state.settingsOpen = false;
       syncSettingsVisibility();
       if (kind === 'playbook') {
-        state.sidebarTab = 'playbooks';
-        renderSidebarTabs();
         selectPlaybook(id);
       } else if (kind === 'skill') {
-        state.sidebarTab = 'skills';
-        renderSidebarTabs();
         selectSkill(id);
       }
-      break;
-    }
-    case 'switch-sidebar-tab': {
-      state.sidebarTab = target.dataset.tab;
-      renderSidebarTabs();
-      renderSidebarList();
-      break;
-    }
-    case 'select-preset': {
-      selectPreset(target.dataset.id);
       break;
     }
     case 'select-playbook': {
@@ -2529,12 +2293,8 @@ function handleDelegatedClick(e) {
       const tType = target.dataset.targetType;
       const tId = target.dataset.targetId;
       if (tType === 'playbook') {
-        state.sidebarTab = 'playbooks';
-        renderSidebarTabs();
         selectPlaybook(tId);
       } else if (tType === 'skill') {
-        state.sidebarTab = 'skills';
-        renderSidebarTabs();
         selectSkill(tId);
       } else if (tType === 'native') {
         if (!state.nativeModifiers.includes(tId)) state.nativeModifiers.push(tId);
