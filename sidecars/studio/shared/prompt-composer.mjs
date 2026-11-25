@@ -105,6 +105,10 @@ export function composePrompt(state, catalog) {
     const pb = playbookMap.get(primary.id);
     const pbNameEn = pb ? pb.titleEn : primary.id;
     const pbTitleZh = pb ? pb.titleZh : primary.id;
+    const pbPathRef =
+      pb?.origin === 'custom' && pb?.sourceFilePath
+        ? pb.sourceFilePath
+        : `skills/poteto-mode/playbooks/${primary.id}.md`;
     titleSuggestion = `[pstack] ${pbTitleZh}`;
 
     const prefixParts = [];
@@ -113,15 +117,21 @@ export function composePrompt(state, catalog) {
 
     if (lang === 'en') {
       const newTaskStr = hasNewTaskPrefix ? 'New task — ' : '';
-      headerLine = `${prefixParts.join(' ')} ${newTaskStr}Run the **${pbNameEn}** playbook (\`skills/poteto-mode/playbooks/${primary.id}.md\`).`;
+      headerLine = `${prefixParts.join(' ')} ${newTaskStr}Run the **${pbNameEn}** playbook (\`${pbPathRef}\`).`;
     } else {
       const newTaskStr = hasNewTaskPrefix ? '【新任务】' : '';
-      headerLine = `${prefixParts.join(' ')} ${newTaskStr}请严格按 **${pbNameEn}（${pbTitleZh}）** Playbook（\`skills/poteto-mode/playbooks/${primary.id}.md\`）执行。`;
+      headerLine = `${prefixParts.join(' ')} ${newTaskStr}请严格按 **${pbNameEn}（${pbTitleZh}）** Playbook（\`${pbPathRef}\`）执行。`;
     }
   } else {
     const sk = skillMap.get(primary.id);
     const slash = sk ? sk.slash : `/${primary.id}`;
     const skTitleZh = sk ? sk.titleZh : primary.id;
+    const customSkillHint =
+      sk && sk.origin && sk.origin !== 'builtin' && sk.sourceFilePath
+        ? lang === 'en'
+          ? ` (read skill definition from \`${sk.sourceFilePath}\`)`
+          : `（技能定义见 \`${sk.sourceFilePath}\`）`
+        : '';
     titleSuggestion = `[pstack] ${slash} ${skTitleZh}`;
 
     const prefixParts = [];
@@ -130,10 +140,10 @@ export function composePrompt(state, catalog) {
 
     if (lang === 'en') {
       const newTaskStr = hasNewTaskPrefix ? 'New task: ' : '';
-      headerLine = `${prefixParts.join(' ')} ${newTaskStr}`.trim();
+      headerLine = `${prefixParts.join(' ')}${customSkillHint} ${newTaskStr}`.trim();
     } else {
       const newTaskStr = hasNewTaskPrefix ? '【新任务】' : '';
-      headerLine = `${prefixParts.join(' ')} ${newTaskStr}`.trim();
+      headerLine = `${prefixParts.join(' ')}${customSkillHint} ${newTaskStr}`.trim();
     }
   }
 
@@ -174,7 +184,13 @@ export function composePrompt(state, catalog) {
 
   if (cleanAddons.length > 0 || agentReadableNatives.length > 0) {
     const tags = [
-      ...cleanAddons.map((id) => `/${id}`),
+      ...cleanAddons.map((id) => {
+        const sk = skillMap.get(id);
+        if (sk && sk.origin && sk.origin !== 'builtin' && sk.sourceFilePath) {
+          return `/${id} (\`${sk.sourceFilePath}\`)`;
+        }
+        return `/${id}`;
+      }),
       ...agentReadableNatives.map((n) => n.slash),
     ];
     directives.push(
@@ -187,7 +203,12 @@ export function composePrompt(state, catalog) {
   if (principleIds.length > 0) {
     const pNames = principleIds.map((id) => {
       const p = principleMap.get(id);
-      return p ? `${id} (${lang === 'en' ? p.shortSlug : p.titleZh.split('（')[0]})` : id;
+      if (!p) return id;
+      const base = `${id} (${lang === 'en' ? p.shortSlug : p.titleZh.split('（')[0]})`;
+      if (p.origin === 'custom' && p.sourceFilePath) {
+        return `${base} [\`${p.sourceFilePath}\`]`;
+      }
+      return base;
     });
     directives.push(
       lang === 'en'

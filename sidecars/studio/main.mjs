@@ -15,6 +15,18 @@ import { Response, SidecarApp } from 'sidecar_sdk';
 import { DEFAULT_PLUGIN_ROOT, readCatalogSourceFile } from './backend/catalog-builder.mjs';
 import { buildClassicAppBundle } from './backend/bundle-frontend.mjs';
 import { checkWorkspaceHealth } from './backend/workspace-health.mjs';
+import {
+  addSkillDir,
+  createUserPrinciple,
+  deleteUserItem,
+  getUserStoreMtimeSignature,
+  readUsageStats,
+  readUserConfig,
+  recordUsage,
+  removeSkillDir,
+  resetUsageStats,
+  updateUiSettings,
+} from './backend/user-store.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = join(__dirname, 'frontend');
@@ -24,16 +36,18 @@ const BACKEND_DIR = join(__dirname, 'backend');
 let cachedCatalogKey = '';
 let cachedCatalogData = null;
 
-async function getLiveCatalog() {
+async function getLiveCatalog(forceReload = false) {
   const m1 = statSync(join(BACKEND_DIR, 'metadata-zh.mjs')).mtimeMs;
   const m2 = statSync(join(BACKEND_DIR, 'catalog-builder.mjs')).mtimeMs;
   const m3 = statSync(join(BACKEND_DIR, 'playbook-graphs.mjs')).mtimeMs;
-  const key = `${m1}:${m2}:${m3}`;
-  if (key === cachedCatalogKey && cachedCatalogData) {
+  const m4 = statSync(join(BACKEND_DIR, 'user-store.mjs')).mtimeMs;
+  const userSig = getUserStoreMtimeSignature();
+  const key = `${m1}:${m2}:${m3}:${m4}:${userSig}`;
+  if (!forceReload && key === cachedCatalogKey && cachedCatalogData) {
     return cachedCatalogData;
   }
   const builderUrl = pathToFileURL(join(BACKEND_DIR, 'catalog-builder.mjs')).href;
-  const mod = await import(`${builderUrl}?v=${m1}_${m2}_${m3}`);
+  const mod = await import(`${builderUrl}?v=${m1}_${m2}_${m3}_${m4}`);
   cachedCatalogData = mod.buildCatalog(DEFAULT_PLUGIN_ROOT);
   cachedCatalogKey = key;
   return cachedCatalogData;
@@ -101,7 +115,7 @@ app.page('/shared/markdown-wysiwyg.mjs', () =>
 );
 
 app.api('/api/catalog', () => getLiveCatalog(), 'GET');
-app.api('/api/catalog', () => getLiveCatalog(), 'POST');
+app.api('/api/catalog', (data) => getLiveCatalog(Boolean(data?.force)), 'POST');
 
 app.api('/api/health', (data) => {
   const workspaceUris = Array.isArray(data?.workspaceUris) ? data.workspaceUris : [];
@@ -110,6 +124,53 @@ app.api('/api/health', (data) => {
 
 app.api('/api/source', (data) => {
   return readCatalogSourceFile(data?.relPath, DEFAULT_PLUGIN_ROOT);
+}, 'POST');
+
+app.api('/api/settings', () => ({
+  settings: readUserConfig(),
+  usage: readUsageStats(),
+}), 'POST');
+
+app.api('/api/settings/ui', async (data) => {
+  const settings = updateUiSettings(data || {});
+  const catalog = await getLiveCatalog(true);
+  return { ok: true, settings, catalog };
+}, 'POST');
+
+app.api('/api/settings/skill-dirs/add', async (data) => {
+  const res = addSkillDir({ path: data?.path, label: data?.label });
+  const catalog = await getLiveCatalog(true);
+  return { ok: true, ...res, catalog };
+}, 'POST');
+
+app.api('/api/settings/skill-dirs/remove', async (data) => {
+  const settings = removeSkillDir(data?.path);
+  const catalog = await getLiveCatalog(true);
+  return { ok: true, settings, catalog };
+}, 'POST');
+
+app.api('/api/settings/create-principle', async (data) => {
+  const created = createUserPrinciple(data || {});
+  const catalog = await getLiveCatalog(true);
+  return { ok: true, created, catalog };
+}, 'POST');
+
+app.api('/api/settings/delete-item', async (data) => {
+  const removed = deleteUserItem({ kind: data?.kind, id: data?.id });
+  const catalog = await getLiveCatalog(true);
+  return { ok: true, removed, catalog };
+}, 'POST');
+
+app.api('/api/usage/record', (data) => {
+  const usage = recordUsage(data || {});
+  if (cachedCatalogData) cachedCatalogData.usage = usage;
+  return { ok: true, usage };
+}, 'POST');
+
+app.api('/api/usage/reset', () => {
+  const usage = resetUsageStats();
+  if (cachedCatalogData) cachedCatalogData.usage = usage;
+  return { ok: true, usage };
 }, 'POST');
 
 app.api('/api/new-conversation', (data) => {

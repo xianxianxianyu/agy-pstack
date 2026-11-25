@@ -13,6 +13,17 @@ import { fileURLToPath } from 'node:url';
 import { buildCatalog, DEFAULT_PLUGIN_ROOT, readCatalogSourceFile } from './backend/catalog-builder.mjs';
 import { buildClassicAppBundle } from './backend/bundle-frontend.mjs';
 import { checkWorkspaceHealth } from './backend/workspace-health.mjs';
+import {
+  addSkillDir,
+  createUserPrinciple,
+  deleteUserItem,
+  readUsageStats,
+  readUserConfig,
+  recordUsage,
+  removeSkillDir,
+  resetUsageStats,
+  updateUiSettings,
+} from './backend/user-store.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = join(__dirname, 'frontend');
@@ -85,9 +96,11 @@ export function createStandaloneStudioServer({
   port = 0,
   pluginRoot = DEFAULT_PLUGIN_ROOT,
   workspacePath = DEFAULT_PLUGIN_ROOT,
+  userDir,
 } = {}) {
   const dispatchedMessages = [];
   const defaultWsUri = workspacePath ? `file://${workspacePath}` : '';
+  const catalogOpts = userDir ? { userDir } : {};
 
   const server = createServer((req, res) => {
     const url = new URL(req.url || '/', `http://${host}`);
@@ -140,7 +153,7 @@ export function createStandaloneStudioServer({
         return;
       }
       if (url.pathname === '/api/catalog') {
-        return sendJson(200, buildCatalog(pluginRoot));
+        return sendJson(200, buildCatalog(pluginRoot, catalogOpts));
       }
       if (url.pathname === '/api/debug-dispatched') {
         return sendJson(200, { items: dispatchedMessages });
@@ -156,7 +169,7 @@ export function createStandaloneStudioServer({
         try {
           const data = body ? JSON.parse(body) : {};
           if (url.pathname === '/api/catalog') {
-            return sendJson(200, buildCatalog(pluginRoot));
+            return sendJson(200, buildCatalog(pluginRoot, catalogOpts));
           }
           if (url.pathname === '/api/health') {
             return sendJson(
@@ -168,7 +181,61 @@ export function createStandaloneStudioServer({
             );
           }
           if (url.pathname === '/api/source') {
-            return sendJson(200, readCatalogSourceFile(data.relPath, pluginRoot));
+            return sendJson(200, readCatalogSourceFile(data.relPath, pluginRoot, catalogOpts));
+          }
+          if (url.pathname === '/api/settings') {
+            return sendJson(200, {
+              settings: readUserConfig(userDir),
+              usage: readUsageStats(userDir),
+            });
+          }
+          if (url.pathname === '/api/settings/ui') {
+            const settings = updateUiSettings(data || {}, userDir);
+            return sendJson(200, {
+              ok: true,
+              settings,
+              catalog: buildCatalog(pluginRoot, catalogOpts),
+            });
+          }
+          if (url.pathname === '/api/settings/skill-dirs/add') {
+            const added = addSkillDir({ path: data?.path, label: data?.label }, userDir);
+            return sendJson(200, {
+              ok: true,
+              ...added,
+              catalog: buildCatalog(pluginRoot, catalogOpts),
+            });
+          }
+          if (url.pathname === '/api/settings/skill-dirs/remove') {
+            const settings = removeSkillDir(data?.path, userDir);
+            return sendJson(200, {
+              ok: true,
+              settings,
+              catalog: buildCatalog(pluginRoot, catalogOpts),
+            });
+          }
+          if (url.pathname === '/api/settings/create-principle') {
+            const created = createUserPrinciple(data || {}, userDir);
+            return sendJson(200, {
+              ok: true,
+              created,
+              catalog: buildCatalog(pluginRoot, catalogOpts),
+            });
+          }
+          if (url.pathname === '/api/settings/delete-item') {
+            const removed = deleteUserItem({ kind: data?.kind, id: data?.id }, userDir);
+            return sendJson(200, {
+              ok: true,
+              removed,
+              catalog: buildCatalog(pluginRoot, catalogOpts),
+            });
+          }
+          if (url.pathname === '/api/usage/record') {
+            const usage = recordUsage(data || {}, userDir);
+            return sendJson(200, { ok: true, usage });
+          }
+          if (url.pathname === '/api/usage/reset') {
+            const usage = resetUsageStats(userDir);
+            return sendJson(200, { ok: true, usage });
           }
           if (url.pathname === '/_sidecar/send-message') {
             const entry = {

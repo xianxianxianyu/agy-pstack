@@ -26,6 +26,12 @@ import {
   SKILL_META,
 } from './metadata-zh.mjs';
 import { PLAYBOOK_GRAPHS } from './playbook-graphs.mjs';
+import {
+  discoverSkillsInDirectory,
+  getUserStudioPaths,
+  readUsageStats,
+  readUserConfig,
+} from './user-store.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_PLUGIN_ROOT = resolve(__dirname, '..', '..', '..');
@@ -208,20 +214,71 @@ function uniqueMerge(...arrays) {
   return out;
 }
 
+const PRINCIPLE_GROUP_LABELS = {
+  core: '核心原则 Core',
+  architecture: '架构原则 Architecture',
+  verification: '验证原则 Verification',
+  delegation: '协同原则 Delegation',
+  meta: '元原则 Meta',
+};
+
+function parseCsvAttr(val) {
+  if (!val) return [];
+  return String(val)
+    .split(/[,，]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /**
- * Builds the complete Studio catalog from `pluginRoot`.
+ * Generates a clean clickable linear SVG flowchart topology for custom playbooks
+ * that do not provide an explicit `<slug>.graph.json`.
  */
-export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT) {
+export function buildAutoFlowchartGraph(steps, fallbackTitle = '执行步骤') {
+  const list = Array.isArray(steps) && steps.length > 0 ? steps : [{ index: 1, title: fallbackTitle, detail: '', mounts: [] }];
+  const rows = [];
+  const edges = [];
+  for (let i = 0; i < list.length; i++) {
+    const st = list[i];
+    const id = `step_${i + 1}`;
+    const rawLabel = st.title || `步骤 ${i + 1}`;
+    const label = rawLabel.length > 30 ? rawLabel.slice(0, 28) + '…' : rawLabel;
+    const rawSub = st.detail && st.detail !== st.title ? st.detail : '';
+    const sub = rawSub.length > 36 ? rawSub.slice(0, 34) + '…' : rawSub;
+    const mounts = Array.isArray(st.mounts) ? st.mounts.slice(0, 6) : [];
+    rows.push([{ id, type: 'step', label, sub, mounts }]);
+    if (i > 0) {
+      edges.push({ from: `step_${i}`, to: id });
+    }
+  }
+  return {
+    topologyLabel: `自定义流程 · ${list.length} 步`,
+    rows,
+    edges,
+  };
+}
+
+/**
+ * Builds the complete Studio catalog from `pluginRoot`, dynamically overlaid with
+ * user-space Playbooks, external/custom Skills, custom Principles, UI settings,
+ * and persisted usage frequency counters (zero modification to upstream files).
+ */
+export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
+  const userDir = options?.userDir;
+  const userPaths = getUserStudioPaths(userDir);
+  const userConfig = readUserConfig(userDir);
+  const usage = readUsageStats(userDir);
+
   const pluginJsonPath = join(pluginRoot, 'plugin.json');
   const pluginManifest = existsSync(pluginJsonPath)
     ? JSON.parse(readFileSync(pluginJsonPath, 'utf-8'))
-    : { name: 'pstack', version: '1.1.0' };
+    : { name: 'pstack', version: '1.2.0' };
 
   const skillsDir = join(pluginRoot, 'skills');
   const playbooksDir = join(skillsDir, 'poteto-mode', 'playbooks');
   const agentsDir = join(pluginRoot, 'agents');
 
-  // 1. Discover all skill directories on disk
+  // 1. Discover all built-in skill directories on disk
   const skillEntries = existsSync(skillsDir)
     ? readdirSync(skillsDir).filter((name) => {
         const full = join(skillsDir, name);
@@ -229,13 +286,14 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT) {
       }).sort()
     : [];
 
-  const workflowSkillIds = skillEntries.filter((n) => !n.startsWith('principle-'));
-  const principleSkillIds = skillEntries.filter((n) => n.startsWith('principle-'));
+  const builtinWorkflowSkillIds = skillEntries.filter((n) => !n.startsWith('principle-'));
+  const builtinPrincipleSkillIds = skillEntries.filter((n) => n.startsWith('principle-'));
 
-  // 2. Build Workflow Skills list
-  const skills = workflowSkillIds.map((id) => {
+  // 2. Build Built-in Workflow Skills list
+  const builtinSkillsList = builtinWorkflowSkillIds.map((id) => {
     const relPath = `skills/${id}/SKILL.md`;
-    const raw = readFileSync(join(pluginRoot, relPath), 'utf-8');
+    const absPath = join(pluginRoot, relPath);
+    const raw = readFileSync(absPath, 'utf-8');
     const { attributes, body } = parseFrontmatter(raw);
     const meta = SKILL_META[id] || {};
     return {
@@ -253,112 +311,333 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT) {
       recommendedPairs: Array.isArray(meta.recommendedPairs) ? meta.recommendedPairs : [],
       examplePrompt: meta.examplePrompt || `/${id} `,
       relPath,
+      sourceFilePath: absPath,
+      origin: 'builtin',
       lineCount: raw.split('\n').length,
       previewExcerpt: body.split('\n').slice(0, 12).join('\n'),
     };
   });
 
-  // 3. Build Principles list
+  // 2b. Discover User Custom Skills (`~/.gemini/config/pstack-studio/skills/`) & External Mounted Skill Dirs
+  const seenSkillIds = new Set(builtinWorkflowSkillIds);
+  const customSkillsList = [];
+
+  const appendDiscoveredSkill = (entry, { origin, sourceLabel, relPath }) => {
+    if (!entry || entry.id.startsWith('principle-')) return { added: false, conflict: false };
+    if (seenSkillIds.has(entry.id)) {
+      return { added: false, conflict: true };
+    }
+    seenSkillIds.add(entry.id);
+    const raw = readFileSync(entry.filePath, 'utf-8');
+    const { attributes, body } = parseFrontmatter(raw);
+    const id = entry.id;
+    const titleZh = attributes.titleZh || attributes.title || attributes.name || id;
+    const titleEn = attributes.titleEn || attributes.name || id;
+    const desc = attributes.shortDesc || attributes.description || `来自 ${sourceLabel} 的扩展技能`;
+    customSkillsList.push({
+      id,
+      slash: `/${id}`,
+      name: attributes.name || id,
+      titleZh,
+      titleEn,
+      shortDesc: desc.slice(0, 90),
+      scenario: attributes.scenario || 'build',
+      roleTag: origin === 'external' ? `外部 · ${sourceLabel}` : '自定义技能',
+      descriptionEn: attributes.description || '',
+      whenToUse: attributes.whenToUse || attributes.description || desc,
+      vsHint: null,
+      recommendedPairs: [],
+      examplePrompt: `/${id} `,
+      relPath,
+      sourceFilePath: entry.filePath,
+      sourceLabel,
+      origin,
+      lineCount: raw.split('\n').length,
+      previewExcerpt: body.split('\n').slice(0, 12).join('\n'),
+    });
+    return { added: true, conflict: false };
+  };
+
+  if (existsSync(userPaths.skillsDir)) {
+    const scan = discoverSkillsInDirectory(userPaths.skillsDir);
+    for (const entry of scan.skills) {
+      appendDiscoveredSkill(entry, {
+        origin: 'custom',
+        sourceLabel: '自定义技能目录',
+        relPath: `user:skills/${entry.id}/SKILL.md`,
+      });
+    }
+  }
+
+  const enrichedSkillDirs = userConfig.skillDirs.map((dirEntry, idx) => {
+    const scan = discoverSkillsInDirectory(dirEntry.resolvedPath);
+    const loadedIds = [];
+    const skippedConflicts = [];
+    for (const entry of scan.skills) {
+      const res = appendDiscoveredSkill(entry, {
+        origin: 'external',
+        sourceLabel: dirEntry.label || basename(dirEntry.resolvedPath),
+        relPath: `ext:${idx}:${entry.id}`,
+      });
+      if (res.added) loadedIds.push(entry.id);
+      else if (res.conflict) skippedConflicts.push(entry.id);
+    }
+    return {
+      ...dirEntry,
+      exists: scan.exists && scan.isDir,
+      discoveredCount: scan.skills.length,
+      loadedIds,
+      skippedConflicts,
+    };
+  });
+
+  const skills = [...builtinSkillsList, ...customSkillsList];
+  const allWorkflowSkillIds = skills.map((s) => s.id);
+
+  // 3. Build Built-in + Custom Principles list
   const groupOrder = ['core', 'architecture', 'verification', 'delegation', 'meta'];
-  const principles = principleSkillIds
-    .map((id) => {
-      const shortSlug = id.replace(/^principle-/, '');
-      const relPath = `skills/${id}/SKILL.md`;
-      const raw = readFileSync(join(pluginRoot, relPath), 'utf-8');
-      const { attributes } = parseFrontmatter(raw);
-      const meta = PRINCIPLE_META[id] || {};
-      return {
+  const seenPrincipleIds = new Set(builtinPrincipleSkillIds);
+
+  const builtinPrinciplesList = builtinPrincipleSkillIds.map((id) => {
+    const shortSlug = id.replace(/^principle-/, '');
+    const relPath = `skills/${id}/SKILL.md`;
+    const absPath = join(pluginRoot, relPath);
+    const raw = readFileSync(absPath, 'utf-8');
+    const { attributes } = parseFrontmatter(raw);
+    const meta = PRINCIPLE_META[id] || {};
+    return {
+      id,
+      shortSlug,
+      slash: `/${id}`,
+      titleZh: meta.titleZh || shortSlug,
+      titleEn: meta.titleEn || shortSlug,
+      group: meta.group || 'core',
+      groupLabel: meta.groupLabel || PRINCIPLE_GROUP_LABELS[meta.group] || '核心原则 Core',
+      summary: meta.summary || attributes.description || '',
+      descriptionEn: attributes.description || '',
+      relPath,
+      sourceFilePath: absPath,
+      origin: 'builtin',
+    };
+  });
+
+  const customPrinciplesList = [];
+  if (existsSync(userPaths.principlesDir)) {
+    const entries = readdirSync(userPaths.principlesDir).sort();
+    for (const name of entries) {
+      if (name.startsWith('.')) continue;
+      const full = join(userPaths.principlesDir, name);
+      let filePath = '';
+      let rawSlug = '';
+      let relPath = '';
+      try {
+        const st = statSync(full);
+        if (st.isFile() && name.endsWith('.md')) {
+          filePath = full;
+          rawSlug = basename(name, '.md');
+          relPath = `user:principles/${name}`;
+        } else if (st.isDirectory() && existsSync(join(full, 'SKILL.md'))) {
+          filePath = join(full, 'SKILL.md');
+          rawSlug = name;
+          relPath = `user:principles/${name}/SKILL.md`;
+        }
+      } catch {
+        continue;
+      }
+      if (!filePath || !rawSlug) continue;
+      const shortSlug = rawSlug.replace(/^principle-/, '');
+      const id = `principle-${shortSlug}`;
+      if (seenPrincipleIds.has(id)) continue;
+      seenPrincipleIds.add(id);
+
+      const raw = readFileSync(filePath, 'utf-8');
+      const { attributes, body } = parseFrontmatter(raw);
+      const grp = groupOrder.includes(attributes.group) ? attributes.group : 'core';
+      const firstBodyLine =
+        body
+          .split('\n')
+          .map((l) => l.trim())
+          .find((l) => l && !l.startsWith('#')) || '';
+      customPrinciplesList.push({
         id,
         shortSlug,
         slash: `/${id}`,
-        titleZh: meta.titleZh || shortSlug,
-        titleEn: meta.titleEn || shortSlug,
-        group: meta.group || 'core',
-        groupLabel: meta.groupLabel || '核心思维 Core',
-        summary: meta.summary || attributes.description || '',
+        titleZh: attributes.titleZh || attributes.title || shortSlug,
+        titleEn: attributes.titleEn || shortSlug,
+        group: grp,
+        groupLabel: PRINCIPLE_GROUP_LABELS[grp] || '核心原则 Core',
+        summary: attributes.summary || attributes.description || firstBodyLine || shortSlug,
         descriptionEn: attributes.description || '',
         relPath,
-      };
-    })
-    .sort((a, b) => {
-      const ga = groupOrder.indexOf(a.group);
-      const gb = groupOrder.indexOf(b.group);
-      if (ga !== gb) return ga - gb;
-      return a.id.localeCompare(b.id);
-    });
+        sourceFilePath: filePath,
+        origin: 'custom',
+      });
+    }
+  }
 
-  // 4. Discover and parse all Playbooks
+  const principles = [...builtinPrinciplesList, ...customPrinciplesList].sort((a, b) => {
+    const ga = groupOrder.indexOf(a.group);
+    const gb = groupOrder.indexOf(b.group);
+    if (ga !== gb) return ga - gb;
+    if (a.origin !== b.origin) return a.origin === 'custom' ? -1 : 1;
+    return a.id.localeCompare(b.id);
+  });
+  const allPrincipleIds = principles.map((p) => p.id);
+
+  // 4. Discover and parse Built-in + Custom Playbooks
   const playbookFiles = existsSync(playbooksDir)
     ? readdirSync(playbooksDir).filter((f) => f.endsWith('.md')).sort()
     : [];
 
   const playbookOrder = Object.keys(PLAYBOOK_META);
-  const playbooks = playbookFiles
-    .map((filename) => {
+  const builtinPlaybooks = playbookFiles.map((filename) => {
+    const id = basename(filename, '.md');
+    const relPath = `skills/poteto-mode/playbooks/${filename}`;
+    const absPath = join(pluginRoot, relPath);
+    const raw = readFileSync(absPath, 'utf-8');
+    const parsed = parsePlaybookMarkdown(id, raw, allWorkflowSkillIds, allPrincipleIds);
+    const meta = PLAYBOOK_META[id] || {};
+
+    const steps =
+      Array.isArray(meta.stepsZh) && meta.stepsZh.length > 0
+        ? meta.stepsZh.map((s, idx) => {
+            const matchedEn = parsed.parsedStepsEn[idx];
+            return {
+              index: idx + 1,
+              title: s.title,
+              detail: s.detail,
+              mounts: Array.isArray(s.mounts) ? s.mounts : [],
+              refs: matchedEn ? matchedEn.refs : { skills: [], principles: [], natives: [], subagents: [] },
+            };
+          })
+        : parsed.parsedStepsEn.map((s) => ({
+            index: s.index,
+            title: `Step ${s.index}`,
+            detail: s.textEn.slice(0, 140),
+            mounts: [...s.refs.skills.map((x) => `/${x}`), ...s.refs.natives],
+            refs: s.refs,
+          }));
+
+    const builtinSkills = uniqueMerge(meta.builtinSkills, parsed.detectedRefs.skills);
+    const builtinPrinciples = uniqueMerge(meta.builtinPrinciples, parsed.detectedRefs.principles);
+    const subagents = uniqueMerge(meta.subagents, parsed.detectedRefs.subagents);
+    const nativeTools = uniqueMerge(meta.nativeTools, parsed.detectedRefs.natives);
+    const chainsOpeningPr = id !== 'opening-a-pr' && /Opening a PR|opening-a-pr\.md/i.test(raw);
+
+    return {
+      id,
+      titleZh: meta.titleZh || parsed.headingEn,
+      titleEn: meta.titleEn || parsed.headingEn,
+      shortDesc: meta.shortDesc || meta.whenToUse || parsed.leadEn,
+      scenario: meta.scenario || 'build',
+      intensity: meta.intensity || 'standard',
+      intensityLabel: meta.intensityLabel || '标准流程',
+      whenToUse: meta.whenToUse || parsed.leadEn,
+      vsHint: meta.vsHint || null,
+      deliverable: meta.deliverable || parsed.replyContractEn,
+      replyContractEn: parsed.replyContractEn,
+      graph: PLAYBOOK_GRAPHS[id] || null,
+      steps,
+      rawStepCount: parsed.parsedStepsEn.length,
+      builtinSkills,
+      builtinPrinciples,
+      subagents,
+      nativeTools,
+      chainsOpeningPr,
+      relPath,
+      sourceFilePath: absPath,
+      origin: 'builtin',
+    };
+  });
+
+  const seenPlaybookIds = new Set(builtinPlaybooks.map((p) => p.id));
+  const customPlaybooks = [];
+  if (existsSync(userPaths.playbooksDir)) {
+    const userPbFiles = readdirSync(userPaths.playbooksDir)
+      .filter((f) => f.endsWith('.md') && !f.startsWith('.'))
+      .sort();
+    for (const filename of userPbFiles) {
       const id = basename(filename, '.md');
-      const relPath = `skills/poteto-mode/playbooks/${filename}`;
-      const raw = readFileSync(join(pluginRoot, relPath), 'utf-8');
-      const parsed = parsePlaybookMarkdown(id, raw, workflowSkillIds, principleSkillIds);
-      const meta = PLAYBOOK_META[id] || {};
+      if (seenPlaybookIds.has(id)) continue;
+      seenPlaybookIds.add(id);
 
-      // Align curated Chinese steps with real parsed references where possible
-      const steps =
-        Array.isArray(meta.stepsZh) && meta.stepsZh.length > 0
-          ? meta.stepsZh.map((s, idx) => {
-              const matchedEn = parsed.parsedStepsEn[idx];
-              return {
-                index: idx + 1,
-                title: s.title,
-                detail: s.detail,
-                mounts: Array.isArray(s.mounts) ? s.mounts : [],
-                refs: matchedEn ? matchedEn.refs : { skills: [], principles: [], natives: [], subagents: [] },
-              };
-            })
-          : parsed.parsedStepsEn.map((s) => ({
-              index: s.index,
-              title: `Step ${s.index}`,
-              detail: s.textEn.slice(0, 140),
-              mounts: [...s.refs.skills.map((x) => `/${x}`), ...s.refs.natives],
-              refs: s.refs,
-            }));
+      const absPath = join(userPaths.playbooksDir, filename);
+      const raw = readFileSync(absPath, 'utf-8');
+      const { attributes, body } = parseFrontmatter(raw);
+      const parsed = parsePlaybookMarkdown(id, body || raw, allWorkflowSkillIds, allPrincipleIds);
 
-      const builtinSkills = uniqueMerge(meta.builtinSkills, parsed.detectedRefs.skills);
-      const builtinPrinciples = uniqueMerge(meta.builtinPrinciples, parsed.detectedRefs.principles);
-      const subagents = uniqueMerge(meta.subagents, parsed.detectedRefs.subagents);
-      const nativeTools = uniqueMerge(meta.nativeTools, parsed.detectedRefs.natives);
-      const chainsOpeningPr = id !== 'opening-a-pr' && /Opening a PR|opening-a-pr\.md/i.test(raw);
+      const steps = parsed.parsedStepsEn.map((s) => {
+        const cleanText = s.textEn.replace(/\*\*/g, '');
+        const splitColon = cleanText.match(/^([^：:]{2,26})[：:]\s*(.+)$/);
+        return {
+          index: s.index,
+          title: splitColon ? splitColon[1].trim() : `${s.index}. ${cleanText.slice(0, 26)}`,
+          detail: splitColon ? splitColon[2].trim() : cleanText,
+          mounts: [
+            ...s.refs.skills.map((x) => `/${x}`),
+            ...s.refs.natives,
+            ...s.refs.principles.map((p) => p.replace(/^principle-/, '')),
+          ],
+          refs: s.refs,
+        };
+      });
 
-      return {
+      let customGraph = null;
+      const graphJsonPath = join(userPaths.playbooksDir, `${id}.graph.json`);
+      if (existsSync(graphJsonPath)) {
+        try {
+          const parsedGraph = JSON.parse(readFileSync(graphJsonPath, 'utf-8'));
+          if (parsedGraph && Array.isArray(parsedGraph.rows) && Array.isArray(parsedGraph.edges)) {
+            customGraph = parsedGraph;
+          }
+        } catch {
+          // Fall back to auto-generated flowchart
+        }
+      }
+      if (!customGraph) {
+        customGraph = buildAutoFlowchartGraph(steps, attributes.titleZh || parsed.headingEn || id);
+      }
+
+      const titleZh = attributes.titleZh || attributes.title || parsed.headingEn || id;
+      const titleEn = attributes.titleEn || id;
+      const validScenarios = SCENARIOS.map((s) => s.id);
+      const scenario = validScenarios.includes(attributes.scenario) ? attributes.scenario : 'build';
+
+      customPlaybooks.push({
         id,
-        titleZh: meta.titleZh || parsed.headingEn,
-        titleEn: meta.titleEn || parsed.headingEn,
-        shortDesc: meta.shortDesc || meta.whenToUse || parsed.leadEn,
-        scenario: meta.scenario || 'build',
-        intensity: meta.intensity || 'standard',
-        intensityLabel: meta.intensityLabel || '标准流程',
-        whenToUse: meta.whenToUse || parsed.leadEn,
-        vsHint: meta.vsHint || null,
-        deliverable: meta.deliverable || parsed.replyContractEn,
-        replyContractEn: parsed.replyContractEn,
-        graph: PLAYBOOK_GRAPHS[id] || null,
+        titleZh,
+        titleEn,
+        shortDesc: attributes.shortDesc || attributes.whenToUse || parsed.leadEn || '用户自定义编排流程',
+        scenario,
+        intensity: attributes.intensity || 'standard',
+        intensityLabel: attributes.intensityLabel || '自定义流程',
+        whenToUse: attributes.whenToUse || parsed.leadEn || '由用户或 Agent 在本地扩展目录创建的自定义 Playbook。',
+        vsHint: null,
+        deliverable: attributes.deliverable || parsed.replyContractEn || '按自定义流程步骤验收交付',
+        replyContractEn: parsed.replyContractEn || '',
+        graph: customGraph,
         steps,
         rawStepCount: parsed.parsedStepsEn.length,
-        builtinSkills,
-        builtinPrinciples,
-        subagents,
-        nativeTools,
-        chainsOpeningPr,
-        relPath,
-      };
-    })
-    .sort((a, b) => {
-      const ia = playbookOrder.indexOf(a.id);
-      const ib = playbookOrder.indexOf(b.id);
-      if (ia !== -1 && ib !== -1) return ia - ib;
-      if (ia !== -1) return -1;
-      if (ib !== -1) return 1;
-      return a.id.localeCompare(b.id);
-    });
+        builtinSkills: uniqueMerge(parseCsvAttr(attributes.builtinSkills), parsed.detectedRefs.skills),
+        builtinPrinciples: uniqueMerge(parseCsvAttr(attributes.builtinPrinciples), parsed.detectedRefs.principles),
+        subagents: parsed.detectedRefs.subagents,
+        nativeTools: parsed.detectedRefs.natives,
+        chainsOpeningPr: /Opening a PR|opening-a-pr\.md/i.test(raw),
+        relPath: `user:playbooks/${filename}`,
+        sourceFilePath: absPath,
+        origin: 'custom',
+      });
+    }
+  }
+
+  const playbooks = [...builtinPlaybooks, ...customPlaybooks].sort((a, b) => {
+    const ia = playbookOrder.indexOf(a.id);
+    const ib = playbookOrder.indexOf(b.id);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.id.localeCompare(b.id);
+  });
 
   // 5. Discover Subagents
   const agentFiles = existsSync(agentsDir)
@@ -384,17 +663,29 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT) {
     plugin: {
       name: pluginManifest.name || 'pstack',
       displayName: pluginManifest.displayName || 'pstack',
-      version: pluginManifest.version || '1.1.0',
+      version: pluginManifest.version || '1.2.0',
       description: pluginManifest.description || '',
       rootPath: pluginRoot,
     },
     counts: {
       playbooks: playbooks.length,
+      builtinPlaybooks: builtinPlaybooks.length,
+      customPlaybooks: customPlaybooks.length,
       skills: skills.length,
+      builtinSkills: builtinSkillsList.length,
+      customSkills: customSkillsList.length,
       principles: principles.length,
+      builtinPrinciples: builtinPrinciplesList.length,
+      customPrinciples: customPrinciplesList.length,
       agents: agents.length,
       recipes: GOLDEN_RECIPES.length,
     },
+    userPaths,
+    settings: {
+      ui: userConfig.ui,
+      skillDirs: enrichedSkillDirs,
+    },
+    usage,
     scenarios: SCENARIOS,
     intentMatcher: INTENT_MATCHER,
     closeCalls: CLOSE_CALLS,
@@ -409,10 +700,60 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT) {
 }
 
 /**
- * Safely reads a relative markdown file inside `pluginRoot` for inline preview.
+ * Safely reads a markdown source file from:
+ * - Built-in `pluginRoot` relative path (e.g. `skills/tdd/SKILL.md`)
+ * - User overlay path (`user:playbooks/<slug>.md`, `user:skills/<slug>/SKILL.md`, `user:principles/...`)
+ * - Mounted external skill directory (`ext:<dirIdx>:<skillSlug>`)
  */
-export function readCatalogSourceFile(relPath, pluginRoot = DEFAULT_PLUGIN_ROOT) {
-  const safeRel = String(relPath || '').replace(/^\/+/, '');
+export function readCatalogSourceFile(relPath, pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
+  const rawRef = String(relPath || '').trim();
+  if (!rawRef || rawRef.includes('..')) {
+    throw new Error('Invalid markdown source path');
+  }
+
+  if (rawRef.startsWith('user:')) {
+    const sub = rawRef.slice('user:'.length).replace(/^\/+/, '');
+    if (!sub || sub.includes('..') || !sub.endsWith('.md')) {
+      throw new Error('Invalid user markdown source path');
+    }
+    const userPaths = getUserStudioPaths(options?.userDir);
+    const absPath = resolve(userPaths.root, sub);
+    const rootPrefix = resolve(userPaths.root) + '/';
+    if (!absPath.startsWith(rootPrefix) || !existsSync(absPath)) {
+      throw new Error(`User source file not found: ${sub}`);
+    }
+    return {
+      relPath: rawRef,
+      absPath,
+      content: readFileSync(absPath, 'utf-8'),
+    };
+  }
+
+  if (rawRef.startsWith('ext:')) {
+    const match = rawRef.match(/^ext:(\d+):([A-Za-z0-9._-]+)$/);
+    if (!match) {
+      throw new Error('Invalid external skill reference');
+    }
+    const dirIdx = Number(match[1]);
+    const skillId = match[2];
+    const cfg = readUserConfig(options?.userDir);
+    const dirEntry = cfg.skillDirs[dirIdx];
+    if (!dirEntry) {
+      throw new Error('External skill directory not configured');
+    }
+    const scan = discoverSkillsInDirectory(dirEntry.resolvedPath);
+    const found = scan.skills.find((s) => s.id === skillId);
+    if (!found || !existsSync(found.filePath)) {
+      throw new Error(`External skill not found: ${skillId}`);
+    }
+    return {
+      relPath: found.filePath,
+      absPath: found.filePath,
+      content: readFileSync(found.filePath, 'utf-8'),
+    };
+  }
+
+  const safeRel = rawRef.replace(/^\/+/, '');
   if (!safeRel || safeRel.includes('..') || !safeRel.endsWith('.md')) {
     throw new Error('Invalid markdown source path');
   }
