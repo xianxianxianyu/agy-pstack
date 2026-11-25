@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pstack Studio</title>
+  <script src="/preload.js"></script>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="studio-root" class="studio-shell">
+    <div id="studio-boot-msg" style="padding: 24px; color: var(--muted-foreground, #666); font-size: 13px;">
+      正在加载 pstack Studio…
+    </div>
+  </div>
+  <script>
+    window.addEventListener('error', function(ev) {
+      var el = document.getElementById('studio-boot-msg');
+      if (el) el.textContent = 'pstack Studio 脚本错误：' + (ev.message || '未知错误');
+    });
+    window.addEventListener('unhandledrejection', function(ev) {
+      var el = document.getElementById('studio-boot-msg');
+      if (el) el.textContent = 'pstack Studio 加载异常：' + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason || '未知错误'));
+    });
+  </script>
+  <script src="/app.js"></script>
+</body>
+</html>
