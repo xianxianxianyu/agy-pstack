@@ -12,7 +12,13 @@ import { markdownToWysiwygHtml, syncComposedIntoUserMarkdown } from '../shared/m
 import { createStandaloneStudioServer } from '../standalone.mjs';
 
 test('buildCatalog discovers all 22 playbooks, 33 workflow skills, 24 principles, and 2 agents with 100% metadata alignment', () => {
-  const catalog = buildCatalog(DEFAULT_PLUGIN_ROOT);
+  const emptyUserDir = mkdtempSync(join(tmpdir(), 'pstack-studio-clean-'));
+  let catalog;
+  try {
+    catalog = buildCatalog(DEFAULT_PLUGIN_ROOT, { userDir: emptyUserDir });
+  } finally {
+    rmSync(emptyUserDir, { recursive: true, force: true });
+  }
 
   assert.equal(catalog.counts.playbooks, 22);
   assert.equal(catalog.counts.skills, 33);
@@ -377,4 +383,174 @@ test('clicking a playbook flowchart node focuses the prompt on that step or deci
   // 4. SVG highlights focused node cleanly
   const svg = renderFlowchartSvg(bugFix.graph, { activeNodeId: 'cross' });
   assert.match(svg, /fc-node-decision fc-node-active[^>]+data-node-id="cross"/);
+});
+
+test('user-space settings, external skill folder mounting, custom playbook/principle overlay, and usage tracking APIs', async () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'pstack-studio-user-'));
+  const userDir = join(tempRoot, 'user-studio');
+  const externalMultiDir = join(tempRoot, 'team-skills');
+  const externalSingleDir = join(tempRoot, 'solo-skill');
+
+  // Create external skills (multi-folder + single-folder) and a custom playbook
+  mkdirSync(join(externalMultiDir, 'db-migrate'), { recursive: true });
+  writeFileSync(
+    join(externalMultiDir, 'db-migrate', 'SKILL.md'),
+    '---\nname: db-migrate\ntitleZh: 数据库迁移生成\ndescription: Generate safe SQL migrations\n---\n\n# db-migrate\n'
+  );
+  mkdirSync(externalSingleDir, { recursive: true });
+  writeFileSync(
+    join(externalSingleDir, 'SKILL.md'),
+    '---\nname: solo-skill\ntitleZh: 单目录独立技能\ndescription: Single folder skill\n---\n\n# solo-skill\n'
+  );
+  mkdirSync(join(userDir, 'playbooks'), { recursive: true });
+  writeFileSync(
+    join(userDir, 'playbooks', 'release-gate.md'),
+    [
+      '---',
+      'titleZh: 发布前检查',
+      'titleEn: Release Gate',
+      'scenario: verify',
+      'whenToUse: 合并高风险变更前执行门禁检查',
+      'deliverable: 影响面清单与实测结论',
+      '---',
+      '',
+      '# Release Gate',
+      '',
+      '1. 变更影响分析：执行 /blast-radius 检查上下游。',
+      '2. 对抗审查：执行 /interrogate 挑战关键风险。',
+      '',
+      '**Reply:** 汇总门禁结果。',
+    ].join('\n')
+  );
+
+  const srv = createStandaloneStudioServer({
+    port: 0,
+    pluginRoot: DEFAULT_PLUGIN_ROOT,
+    userDir,
+  });
+  const info = await srv.start();
+  try {
+    // 1. Update UI preferences (theme, fontFamily, fontSize)
+    const uiRes = await fetch(`${info.url}/api/settings/ui`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeMode: 'dark', fontFamily: 'mono', fontSize: 16 }),
+    });
+    assert.equal(uiRes.status, 200);
+    const uiJson = await uiRes.json();
+    assert.equal(uiJson.settings.ui.themeMode, 'dark');
+    assert.equal(uiJson.settings.ui.fontFamily, 'mono');
+    assert.equal(uiJson.settings.ui.fontSize, 16);
+
+    // 2. Mount both external skill folders
+    for (const dir of [externalMultiDir, externalSingleDir]) {
+      const addRes = await fetch(`${info.url}/api/settings/skill-dirs/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dir }),
+      });
+      assert.equal(addRes.status, 200);
+      const addJson = await addRes.json();
+      assert.equal(addJson.discoveredCount, 1);
+    }
+
+    // 3. Create custom principle via API
+    const prinRes = await fetch(`${info.url}/api/settings/create-principle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        titleZh: '接口向后兼容优先',
+        slug: 'api-compat',
+        group: 'architecture',
+        summary: '对外接口仅做增量扩展，破坏性变更需过渡期',
+      }),
+    });
+    assert.equal(prinRes.status, 200);
+    const prinJson = await prinRes.json();
+    assert.equal(prinJson.created.id, 'principle-api-compat');
+
+    // 4. Verify merged catalog includes custom playbook (with auto SVG graph), external skills, and custom principle
+    const catRes = await fetch(`${info.url}/api/catalog`);
+    const cat = await catRes.json();
+    assert.equal(cat.counts.playbooks, 23);
+    assert.equal(cat.counts.skills, 35);
+    assert.equal(cat.counts.principles, 25);
+
+    const customPb = cat.playbooks.find((p) => p.id === 'release-gate');
+    assert.ok(customPb && customPb.origin === 'custom');
+    assert.ok(customPb.graph && customPb.graph.rows.length === 2);
+    assert.match(renderFlowchartSvg(customPb.graph), /^<svg/);
+
+    // Prompt composer cites exact file paths for custom playbook & external skills
+    const composed = composePrompt(
+      {
+        primary: { type: 'playbook', id: 'release-gate' },
+        addonSkills: ['db-migrate'],
+        principles: ['principle-api-compat'],
+        goal: '准备发布订单服务 v2',
+        lang: 'zh',
+      },
+      cat
+    );
+    assert.match(composed.prompt, /release-gate\.md/);
+    assert.match(composed.prompt, /\/db-migrate \(`[^`]+db-migrate\/SKILL\.md`\)/);
+    assert.match(composed.prompt, /principle-api-compat/);
+
+    // Safe source reading works for user & external items
+    const extSk = cat.skills.find((s) => s.id === 'db-migrate');
+    const extSrcRes = await fetch(`${info.url}/api/source`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relPath: extSk.relPath }),
+    });
+    assert.equal(extSrcRes.status, 200);
+    const extSrcJson = await extSrcRes.json();
+    assert.match(extSrcJson.content, /Generate safe SQL migrations/);
+
+    // Built-in items cannot be deleted
+    const delBuiltin = await fetch(`${info.url}/api/settings/delete-item`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'playbook', id: 'bug-fix' }),
+    });
+    assert.equal(delBuiltin.status, 500);
+
+    // 5. Usage recording and resetting persists across requests
+    const rec1 = await fetch(`${info.url}/api/usage/record`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        presetId: 'clean-and-open-pr',
+        playbookId: 'opening-a-pr',
+        skillIds: ['interrogate', 'unslop'],
+        principleIds: ['principle-prove-it-works'],
+      }),
+    });
+    assert.equal(rec1.status, 200);
+    const rec2 = await fetch(`${info.url}/api/usage/record`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        presetId: 'clean-and-open-pr',
+        playbookId: 'opening-a-pr',
+        skillIds: ['interrogate'],
+      }),
+    });
+    const rec2Json = await rec2.json();
+    assert.equal(rec2Json.usage.playbooks['opening-a-pr'], 2);
+    assert.equal(rec2Json.usage.skills.interrogate, 2);
+    assert.equal(rec2Json.usage.skills.unslop, 1);
+
+    const resetRes = await fetch(`${info.url}/api/usage/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const resetJson = await resetRes.json();
+    assert.deepEqual(resetJson.usage.playbooks, {});
+    assert.deepEqual(resetJson.usage.skills, {});
+  } finally {
+    await srv.stop();
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

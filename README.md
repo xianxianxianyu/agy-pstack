@@ -23,7 +23,7 @@ Rather than wrapping Cursor instructions in a compatibility shim, every workflow
 | Conversation history, recall & eval verification | Native transcripts (`~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl`) & `conversation://` links |
 | Capturing learnings & managing context | `/reflect` + `/correct` paired with native **`/learn`** and **`/compact`** |
 | Model & tier configuration | `/setup-pstack` → `~/.gemini/config/rules/pstack-models.md` (`inherit` / `pro` / `flash` / `flash_lite` + live `swarm{action:"models"}`) |
-| Visual Playbook & Skill Composer UI | **`pstack Studio`** Aux Pane sidecar (`sidecars/studio/`): interactive intent matcher, 22-playbook pipeline visualizer, close-call comparisons, and one-click dispatch to chat |
+| Visual Playbook & Skill Composer UI | **`pstack Studio`** Aux Pane sidecar (`sidecars/studio/`): interactive clickable Mermaid flowcharts for all 22 playbooks, WYSIWYG Markdown composer, usage-frequency ranking, and a zero-conflict Settings center (`~/.gemini/config/pstack-studio/`) for custom playbooks, external skill folders, and principles |
 | Scripts & PR watcher | **Bun**-native (`watch-pr`, `statechart`, `worktree-audit.sh`) |
 
 ## Install
