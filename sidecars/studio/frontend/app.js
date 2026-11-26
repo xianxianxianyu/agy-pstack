@@ -9,6 +9,7 @@
 import { composePrompt } from '/shared/prompt-composer.mjs';
 import { renderFlowchartSvg, toMermaidCode } from '/shared/flowchart-svg.mjs';
 import {
+  extractUserGoalFromMarkdown,
   markdownToWysiwygHtml,
   serializeWysiwygElement,
   syncComposedIntoUserMarkdown,
@@ -163,6 +164,7 @@ const initialUiPrefs = loadLocalUiPrefs();
 const state = {
   catalog: null,
   health: null,
+  workspaceUris: [],
   resolvedProjectId: '',
   themeMode: initialUiPrefs.themeMode, // 'auto' | 'light' | 'dark'
   fontFamily: initialUiPrefs.fontFamily, // 'system' | 'sans-cn' | 'mono' | 'serif'
@@ -184,11 +186,13 @@ const state = {
 
   // Master list state (Playbooks only, usage-ranked)
   selectedNavKey: 'playbook:bug-fix',
+  lastPlaybookId: 'bug-fix',
   viewingPrincipleId: null,
   mobileDetailOpen: false,
 
-  // Composer state (WYSIWYG Markdown top + all option groups expanded below)
+  // Composer state (WYSIWYG Markdown top + 3-layer option shelf below)
   customizeOpen: true,
+  layerOpen: { native: true, skills: true, principles: true },
   showAllShelfSkills: true,
   showAllShelfPrinciples: true,
   launchMode: loadSavedLaunchMode(),
@@ -355,11 +359,36 @@ function getComposed() {
   return composePrompt(state, state.catalog);
 }
 
-function getEffectivePrompt() {
+function captureUserGoalFromEditor() {
   const editorEl = document.getElementById('wysiwyg-editor');
   if (editorEl) {
     state.markdownDoc = serializeWysiwygElement(editorEl);
+    const slot = editorEl.querySelector('.md-goal-slot');
+    if (slot) {
+      const val = (slot.textContent || '').replace(/\u00a0/g, ' ').trim();
+      const nextGoal = !val || /^<.+>$/.test(val) ? '' : val;
+      // Do not overwrite user goal with a skill's built-in examplePrompt unless user edited it
+      if (state.primary.type === 'skill') {
+        const curSkill = findSkill(state.primary.id);
+        const curExampleTail = curSkill?.examplePrompt
+          ? extractUserGoalFromMarkdown(curSkill.examplePrompt)
+          : '';
+        if (curExampleTail && nextGoal === curExampleTail && !state.goal) {
+          return;
+        }
+      }
+      state.goal = nextGoal;
+      return;
+    }
   }
+  const extracted = extractUserGoalFromMarkdown(state.markdownDoc);
+  if (extracted) {
+    state.goal = extracted;
+  }
+}
+
+function getEffectivePrompt() {
+  captureUserGoalFromEditor();
   return (state.markdownDoc || getComposed().prompt).trim();
 }
 
@@ -408,9 +437,96 @@ function findScenarioTitle(scId) {
   return state.catalog?.scenarios.find((s) => s.id === scId)?.titleZh || '';
 }
 
-// ---------------------------------------------------------------------------
-// Shell Mount
-// ---------------------------------------------------------------------------
+function recordExplicitSkillUsage(skillId) {
+  if (!skillId) return;
+  state.usage.skills[skillId] = (state.usage.skills[skillId] || 0) + 1;
+  saveLocalUsage(state.usage);
+  renderStageRegion();
+  if (state.settingsOpen) renderSettingsRegion();
+
+  void apiFetch('/api/usage/record', {
+    method: 'POST',
+    body: JSON.stringify({ skillIds: [skillId] }),
+  })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (data?.usage) {
+        state.usage = data.usage;
+        saveLocalUsage(state.usage);
+        renderStageRegion();
+      }
+    })
+    .catch(() => {});
+}
+
+function groupSkillsByAuthor(skillsList) {
+  const buckets = new Map();
+  for (const sk of skillsList) {
+    const key = sk.author || 'other';
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        key,
+        label: sk.authorLabel || (key === 'other' ? 'Other' : `@${key}`),
+        items: [],
+      });
+    }
+    buckets.get(key).items.push(sk);
+  }
+  const groups = [];
+  for (const g of buckets.values()) {
+    g.items = sortByUsageDesc(g.items, (s) => getSkillUsage(s.id));
+    g.totalUsage = g.items.reduce((sum, s) => sum + getSkillUsage(s.id), 0);
+    groups.push(g);
+  }
+  groups.sort((a, b) => {
+    if (a.key === 'poteto') return -1;
+    if (b.key === 'poteto') return 1;
+    if (a.key === 'other') return 1;
+    if (b.key === 'other') return -1;
+    if (b.totalUsage !== a.totalUsage) return b.totalUsage - a.totalUsage;
+    return a.key.localeCompare(b.key);
+  });
+  return groups;
+}
+
+function renderSkillPillWithHoverCard(s) {
+  const on = state.addonSkills.includes(s.id);
+  const cnt = getSkillUsage(s.id);
+  const originBadge =
+    s.origin === 'workspace'
+      ? '<span class="origin-tag">项目默认</span>'
+      : s.origin === 'global'
+        ? '<span class="origin-tag">全局默认</span>'
+        : s.origin === 'external'
+          ? '<span class="origin-tag">外部挂载</span>'
+          : s.origin === 'custom'
+            ? '<span class="origin-tag">自定义</span>'
+            : '';
+
+  return `
+    <span class="skill-pill-wrap">
+      <button
+        type="button"
+        class="opt-pill skill-pill-btn ${on ? 'on' : ''}"
+        data-action="toggle-addon-skill"
+        data-id="${esc(s.id)}"
+      >
+        <span>${esc(s.slash)} ${esc(s.titleZh)}</span>${cnt > 0 ? `<span class="pill-count">${cnt}</span>` : ''}
+      </button>
+      <div class="skill-hover-card" role="tooltip">
+        <div class="shc-top">
+          <span class="shc-slash">${esc(s.slash)}</span>
+          ${originBadge}
+        </div>
+        <div class="shc-desc">${esc(s.shortDesc || s.titleZh)}</div>
+        <div class="shc-actions">
+          <button type="button" class="shc-btn shc-btn-primary" data-action="run-skill-solo" data-id="${esc(s.id)}">单跑此技能</button>
+          <button type="button" class="shc-btn" data-action="copy-skill-slash" data-id="${esc(s.id)}">复制命令</button>
+        </div>
+      </div>
+    </span>
+  `;
+}
 
 function mountShell() {
   const root = document.getElementById('studio-root');
@@ -841,6 +957,7 @@ function renderSkillStage(sk) {
   const relatedCloseCall = state.catalog.closeCalls.find((cc) =>
     cc.items.some((it) => it.ref === sk.slash)
   );
+  const lastPb = findPlaybook(state.lastPlaybookId) || state.catalog.playbooks[0];
 
   const pairs = (sk.recommendedPairs || []).map((id) => findSkill(id)).filter(Boolean);
 
@@ -849,8 +966,15 @@ function renderSkillStage(sk) {
 
     <section class="stage-header">
       <div class="stage-kicker-row">
-        <span class="stage-kicker">独立技能 · ${esc(scTitle)} · ${esc(sk.roleTag)}</span>
-        <button type="button" class="text-link" data-action="open-source" data-path="${esc(sk.relPath)}">查看原文</button>
+        <span class="stage-kicker">单跑技能 · ${esc(sk.authorLabel || 'Other')} · ${esc(sk.roleTag)}</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          ${
+            lastPb
+              ? `<button type="button" class="text-link" data-action="return-to-playbook">← 返回流程（${esc(lastPb.titleZh)}）</button>`
+              : ''
+          }
+          <button type="button" class="text-link" data-action="open-source" data-path="${esc(sk.relPath)}">查看原文</button>
+        </div>
       </div>
       <div class="stage-title-row">
         <h1 class="stage-title">${esc(sk.titleZh)}</h1>
@@ -1077,28 +1201,31 @@ function renderSplitLaunchButton() {
 function renderCustomizeShelfHtml() {
   const cat = state.catalog;
   const quickSkillIds = [
-    'architect',
-    'tdd',
-    'interrogate',
     'blast-radius',
-    'arena',
     'how',
-    'why',
-    'no-comments',
-    'unslop',
+    'teach',
+    'recall',
+    'sharpen',
+    'reframe',
+    'reflect',
+    'correct',
+    'statechart',
     'typescript-best-practices',
   ];
   const allSelectableSkills = sortByUsageDesc(
-    cat.skills.filter((s) => !(state.primary.type === 'skill' && state.primary.id === s.id)),
+    cat.skills.filter(
+      (s) => !s.inAnyPlaybook && !(state.primary.type === 'skill' && state.primary.id === s.id)
+    ),
     (s) => getSkillUsage(s.id)
   );
+  const selectableSkillIdSet = new Set(allSelectableSkills.map((s) => s.id));
   const shownSkills = state.showAllShelfSkills
     ? allSelectableSkills
     : (() => {
         const usedTop = allSelectableSkills.filter((s) => getSkillUsage(s.id) > 0);
         const defaults = quickSkillIds
           .map((id) => findSkill(id))
-          .filter((s) => s && !(state.primary.type === 'skill' && state.primary.id === s.id));
+          .filter((s) => s && selectableSkillIdSet.has(s.id));
         const seen = new Set();
         const merged = [];
         for (const s of [...usedTop, ...defaults]) {
@@ -1119,26 +1246,50 @@ function renderCustomizeShelfHtml() {
     'principle-subtract-before-you-add',
     'principle-minimize-reader-load',
   ];
-  const sortedPrinciples = sortByUsageDesc(cat.principles, (p) => getPrincipleUsage(p.id));
-  const shownPrinciples = state.showAllShelfPrinciples
-    ? sortedPrinciples
+  const builtinPrinciples = sortByUsageDesc(
+    cat.principles.filter((p) => p.origin !== 'custom'),
+    (p) => getPrincipleUsage(p.id)
+  );
+  const customPrinciples = sortByUsageDesc(
+    cat.principles.filter((p) => p.origin === 'custom'),
+    (p) => getPrincipleUsage(p.id)
+  );
+  const shownBuiltinPrinciples = state.showAllShelfPrinciples
+    ? builtinPrinciples
     : (() => {
-        const usedTop = sortedPrinciples.filter((p) => getPrincipleUsage(p.id) > 0);
+        const activeOrUsed = builtinPrinciples.filter(
+          (p) => state.principles.includes(p.id) || getPrincipleUsage(p.id) > 0
+        );
         const defaults = quickPrincipleIds.map((id) => findPrinciple(id)).filter(Boolean);
         const seen = new Set();
         const merged = [];
-        for (const p of [...usedTop, ...defaults]) {
+        for (const p of [...activeOrUsed, ...defaults]) {
           if (!seen.has(p.id)) {
             seen.add(p.id);
             merged.push(p);
           }
-          if (merged.length >= 6) break;
+          if (merged.length >= 8) break;
         }
         return merged;
       })();
 
-  const hasSkillCounts = allSelectableSkills.some((s) => getSkillUsage(s.id) > 0);
-  const hasPrinCounts = sortedPrinciples.some((p) => getPrincipleUsage(p.id) > 0);
+  const sessionModes = cat.nativeModifiers.filter((nm) => nm.hostInterceptOnly);
+  const runtimeEngines = cat.nativeModifiers.filter((nm) => !nm.hostInterceptOnly);
+
+  const nativeSelectedCount = state.nativeModifiers.length;
+  const skillsSelectedCount = state.addonSkills.filter((id) => selectableSkillIdSet.has(id)).length;
+  const principlesSelectedCount = state.constraints.length + state.principles.length;
+
+  const renderNativePill = (nm) => {
+    const on = state.nativeModifiers.includes(nm.id);
+    return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-native" data-id="${esc(nm.id)}" title="${esc(nm.summary)}">${esc(nm.slash)} ${esc(nm.titleZh)}</button>`;
+  };
+
+  const renderPrinciplePill = (pr) => {
+    const on = state.principles.includes(pr.id);
+    const cnt = getPrincipleUsage(pr.id);
+    return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-principle" data-id="${esc(pr.id)}" title="${esc(pr.titleEn)}：${esc(pr.summary)}"><span>${esc(pr.titleZh)}</span>${cnt > 0 ? `<span class="pill-count">${cnt}</span>` : ''}</button>`;
+  };
 
   return `
     <div class="customize-shelf">
@@ -1153,64 +1304,156 @@ function renderCustomizeShelfHtml() {
         />
       </div>
 
-      <div class="shelf-group">
-        <span class="shelf-title">执行约束</span>
-        <div class="shelf-pills">
-          ${cat.constraints
-            .map((c) => {
-              const on = state.constraints.includes(c.id);
-              return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-constraint" data-id="${esc(c.id)}">${esc(c.label)}</button>`;
-            })
-            .join('')}
-        </div>
+      <!-- Layer 1: Native Capabilities -->
+      <div class="shelf-layer" data-layer="native">
+        <button type="button" class="shelf-layer-head" data-action="toggle-shelf-layer" data-layer="native" aria-expanded="${state.layerOpen.native ? 'true' : 'false'}">
+          <span class="shelf-layer-left">
+            <span class="shelf-layer-index">1</span>
+            <span class="shelf-layer-title">原生能力</span>
+            <span class="shelf-layer-en">Native</span>
+            ${nativeSelectedCount > 0 ? `<span class="layer-selected-badge">已选 ${nativeSelectedCount}</span>` : ''}
+          </span>
+          <span class="shelf-layer-chevron">${state.layerOpen.native ? '收起 ▴' : '展开 ▾'}</span>
+        </button>
+        ${
+          state.layerOpen.native
+            ? `
+          <div class="shelf-layer-body">
+            <div class="native-subgroups-row">
+              <div class="shelf-subgroup">
+                <div class="shelf-subgroup-left">
+                  <span class="shelf-subgroup-tag">会话模式</span>
+                  <span class="skill-author-count">${sessionModes.length}</span>
+                </div>
+                <div class="shelf-pills">
+                  ${sessionModes.map(renderNativePill).join('')}
+                </div>
+              </div>
+              <div class="shelf-subgroup">
+                <div class="shelf-subgroup-left">
+                  <span class="shelf-subgroup-tag">执行引擎</span>
+                  <span class="skill-author-count">${runtimeEngines.length}</span>
+                </div>
+                <div class="shelf-pills">
+                  ${runtimeEngines.map(renderNativePill).join('')}
+                </div>
+              </div>
+            </div>
+          </div>
+        `
+            : ''
+        }
       </div>
 
-      <div class="shelf-group">
-        <span class="shelf-title">原生能力</span>
-        <div class="shelf-pills">
-          ${cat.nativeModifiers
-            .map((nm) => {
-              const on = state.nativeModifiers.includes(nm.id);
-              return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-native" data-id="${esc(nm.id)}" title="${esc(nm.summary)}">${esc(nm.slash)} ${esc(nm.titleZh)}</button>`;
-            })
-            .join('')}
-        </div>
+      <!-- Layer 2: Skills (Grouped by Author, Usage-Ranked) -->
+      <div class="shelf-layer" data-layer="skills">
+        <button type="button" class="shelf-layer-head" data-action="toggle-shelf-layer" data-layer="skills" aria-expanded="${state.layerOpen.skills ? 'true' : 'false'}">
+          <span class="shelf-layer-left">
+            <span class="shelf-layer-index">2</span>
+            <span class="shelf-layer-title">叠加技能</span>
+            <span class="shelf-layer-en">Skills · ${allSelectableSkills.length}</span>
+            ${skillsSelectedCount > 0 ? `<span class="layer-selected-badge">已选 ${skillsSelectedCount}</span>` : ''}
+          </span>
+          <span class="shelf-layer-chevron">${state.layerOpen.skills ? '收起 ▴' : '展开 ▾'}</span>
+        </button>
+        ${
+          state.layerOpen.skills
+            ? `
+          <div class="shelf-layer-body">
+            <div class="skill-author-groups">
+              ${groupSkillsByAuthor(shownSkills)
+                .map(
+                  (grp, idx) => `
+                <div class="skill-author-block" data-author-group="${esc(grp.key)}">
+                  <div class="shelf-subgroup-head">
+                    <div class="shelf-subgroup-left">
+                      <span class="skill-author-badge ${grp.key === 'poteto' ? 'is-poteto' : ''}">${esc(grp.label)}</span>
+                      <span class="skill-author-count">${grp.items.length}</span>
+                    </div>
+                    ${
+                      idx === 0
+                        ? `<button type="button" class="text-link" data-action="toggle-shelf-skills">${state.showAllShelfSkills ? '收起为常用 ▴' : `展开全部 ${allSelectableSkills.length} 个 ▾`}</button>`
+                        : ''
+                    }
+                  </div>
+                  <div class="shelf-pills">
+                    ${grp.items.map((s) => renderSkillPillWithHoverCard(s)).join('')}
+                  </div>
+                </div>
+              `
+                )
+                .join('')}
+            </div>
+          </div>
+        `
+            : ''
+        }
       </div>
 
-      <div class="shelf-group">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <span class="shelf-title">叠加技能（${state.showAllShelfSkills ? `全部 ${allSelectableSkills.length} 个` : `常用 ${shownSkills.length} / ${allSelectableSkills.length}`}${hasSkillCounts ? ' · 已按使用频次靠前' : ''}）</span>
-          <button type="button" class="text-link" data-action="toggle-shelf-skills">
-            ${state.showAllShelfSkills ? '收起为常用 ▴' : `展开全部 ${allSelectableSkills.length} 个 ▾`}
-          </button>
-        </div>
-        <div class="shelf-pills">
-          ${shownSkills
-            .map((s) => {
-              const on = state.addonSkills.includes(s.id);
-              const cnt = getSkillUsage(s.id);
-              return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-addon-skill" data-id="${esc(s.id)}" title="${esc(s.titleEn)} · ${esc(s.shortDesc)}"><span>${esc(s.slash)} ${esc(s.titleZh)}</span>${cnt > 0 ? `<span class="pill-count">${cnt}</span>` : ''}</button>`;
-            })
-            .join('')}
-        </div>
-      </div>
+      <!-- Layer 3: Principles & Guardrails (Execution Guardrails + Engineering Principles) -->
+      <div class="shelf-layer" data-layer="principles">
+        <button type="button" class="shelf-layer-head" data-action="toggle-shelf-layer" data-layer="principles" aria-expanded="${state.layerOpen.principles ? 'true' : 'false'}">
+          <span class="shelf-layer-left">
+            <span class="shelf-layer-index">3</span>
+            <span class="shelf-layer-title">原则与护栏</span>
+            <span class="shelf-layer-en">Principles & Guardrails</span>
+            ${principlesSelectedCount > 0 ? `<span class="layer-selected-badge">已选 ${principlesSelectedCount}</span>` : ''}
+          </span>
+          <span class="shelf-layer-chevron">${state.layerOpen.principles ? '收起 ▴' : '展开 ▾'}</span>
+        </button>
+        ${
+          state.layerOpen.principles
+            ? `
+          <div class="shelf-layer-body">
+            <div class="shelf-subgroup" data-principle-group="guardrails">
+              <div class="shelf-subgroup-left">
+                <span class="shelf-subgroup-tag is-guardrail">执行护栏</span>
+                <span class="skill-author-count">${cat.constraints.length}</span>
+              </div>
+              <div class="shelf-pills">
+                ${cat.constraints
+                  .map((c) => {
+                    const on = state.constraints.includes(c.id);
+                    return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-constraint" data-id="${esc(c.id)}">${esc(c.label)}</button>`;
+                  })
+                  .join('')}
+              </div>
+            </div>
 
-      <div class="shelf-group">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <span class="shelf-title">工程原则（${state.showAllShelfPrinciples ? `全部 ${cat.principles.length} 条` : `常用 ${shownPrinciples.length} / ${cat.principles.length}`}${hasPrinCounts ? ' · 已按使用频次靠前' : ''}）</span>
-          <button type="button" class="text-link" data-action="toggle-shelf-principles">
-            ${state.showAllShelfPrinciples ? '收起为常用 ▴' : `展开全部 ${cat.principles.length} 条 ▾`}
-          </button>
-        </div>
-        <div class="shelf-pills">
-          ${shownPrinciples
-            .map((pr) => {
-              const on = state.principles.includes(pr.id);
-              const cnt = getPrincipleUsage(pr.id);
-              return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-principle" data-id="${esc(pr.id)}" title="${esc(pr.titleEn)}：${esc(pr.summary)}"><span>${esc(pr.titleZh)}</span>${cnt > 0 ? `<span class="pill-count">${cnt}</span>` : ''}</button>`;
-            })
-            .join('')}
-        </div>
+            <div class="shelf-subgroup" data-principle-group="poteto">
+              <div class="shelf-subgroup-head">
+                <div class="shelf-subgroup-left">
+                  <span class="skill-author-badge is-poteto">@poteto · 工程原则</span>
+                  <span class="skill-author-count">${builtinPrinciples.length}</span>
+                </div>
+                <button type="button" class="text-link" data-action="toggle-shelf-principles">
+                  ${state.showAllShelfPrinciples ? '收起为常用 ▴' : `展开全部 ${builtinPrinciples.length} 条 ▾`}
+                </button>
+              </div>
+              <div class="shelf-pills">
+                ${shownBuiltinPrinciples.map(renderPrinciplePill).join('')}
+              </div>
+            </div>
+
+            ${
+              customPrinciples.length > 0
+                ? `
+              <div class="shelf-subgroup" data-principle-group="custom">
+                <div class="shelf-subgroup-left">
+                  <span class="skill-author-badge">自定义原则</span>
+                  <span class="skill-author-count">${customPrinciples.length}</span>
+                </div>
+                <div class="shelf-pills">
+                  ${customPrinciples.map(renderPrinciplePill).join('')}
+                </div>
+              </div>
+            `
+                : ''
+            }
+          </div>
+        `
+            : ''
+        }
       </div>
     </div>
   `;
@@ -1229,7 +1472,7 @@ function bindComposerInputs() {
           ph.classList.remove('md-placeholder');
         }
       }
-      state.markdownDoc = serializeWysiwygElement(editorEl);
+      captureUserGoalFromEditor();
     });
     editorEl.addEventListener('keydown', handleSubmitShortcut);
     // Select inner contents of placeholder so typing replaces text while keeping the blue slot pill
@@ -1537,16 +1780,49 @@ function renderSettingsSkillsTab() {
   const cat = state.catalog;
   const userSkillsDir = cat.userPaths?.skillsDir || '~/.gemini/config/pstack-studio/skills';
   const skillDirs = cat.settings?.skillDirs || [];
+  const defaultSources = cat.settings?.defaultSkillSources || [];
   const customSkills = cat.skills.filter((s) => s.origin !== 'builtin');
 
   return `
     <div class="settings-header">
       <div>
         <h1 class="settings-title">技能管理（Skills）</h1>
-        <p class="settings-desc">内置 ${cat.counts.builtinSkills ?? 33} 个技能保持只读以持续接收上游更新。可通过挂载外部文件夹路径直接引入团队/个人技能，或让主对话 Agent 新建自定义技能。</p>
+        <p class="settings-desc">内置 ${cat.counts.builtinSkills ?? 33} 个技能保持只读以持续接收上游更新。插件会自动发现全局与当前工作区默认加载的技能，也支持按路径挂载外部目录；有 <code>author</code> 的按作者分组，未署名的自动归入 <code>Other</code>。</p>
       </div>
       <button type="button" class="btn btn-secondary" data-action="refresh-catalog">刷新扫描</button>
     </div>
+
+    ${
+      defaultSources.length > 0
+        ? `
+      <section class="settings-card">
+        <div>
+          <h2 class="settings-card-title">已自动发现的默认加载技能目录</h2>
+          <p class="settings-card-sub">来自 Antigravity 全局配置或当前工作区 <code>.agents/skills</code>，无需手动配置路径。</p>
+        </div>
+        <div class="settings-item-list">
+          ${defaultSources
+            .map(
+              (src) => `
+            <div class="settings-item-row">
+              <div class="settings-item-main">
+                <div class="settings-item-title">
+                  <span class="status-dot"></span>
+                  <span>${esc(src.label)}</span>
+                  <span class="origin-tag">自动加载 ${src.loadedIds.length} 个</span>
+                </div>
+                <div class="settings-item-path">${esc(src.path)}</div>
+                <div class="settings-card-sub">${esc(src.loadedIds.map((x) => `/${x}`).join('、'))}</div>
+              </div>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      </section>
+    `
+        : ''
+    }
 
     <section class="settings-card">
       <div>
@@ -1889,7 +2165,7 @@ async function refreshCatalogLive(showFeedback = true) {
   try {
     const res = await apiFetch('/api/catalog', {
       method: 'POST',
-      body: JSON.stringify({ force: true }),
+      body: JSON.stringify({ force: true, workspaceUris: state.workspaceUris }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.catalog = await res.json();
@@ -2067,7 +2343,7 @@ async function openSourceModal(relPath) {
   try {
     const res = await apiFetch('/api/source', {
       method: 'POST',
-      body: JSON.stringify({ relPath }),
+      body: JSON.stringify({ relPath, workspaceUris: state.workspaceUris }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '读取失败');
@@ -2091,10 +2367,12 @@ function toggleArrayItem(arr, val) {
 function selectPlaybook(playbookId) {
   const pb = findPlaybook(playbookId);
   if (!pb) return;
+  captureUserGoalFromEditor();
   const matchedRecipe = (state.catalog?.recipes || []).find(
     (r) => r.primary?.type === 'playbook' && r.primary?.id === pb.id
   );
   state.selectedNavKey = `playbook:${pb.id}`;
+  state.lastPlaybookId = pb.id;
   state.viewingPrincipleId = null;
   state.primary = { type: 'playbook', id: pb.id };
   state.activeNodeId = null;
@@ -2125,6 +2403,7 @@ function selectPlaybook(playbookId) {
 function selectSkill(skillId) {
   const sk = findSkill(skillId);
   if (!sk) return;
+  captureUserGoalFromEditor();
   state.selectedNavKey = `skill:${sk.id}`;
   state.viewingPrincipleId = null;
   state.primary = { type: 'skill', id: sk.id };
@@ -2458,6 +2737,30 @@ function handleDelegatedClick(e) {
       renderStageRegion();
       break;
     }
+    case 'run-skill-solo': {
+      e.stopPropagation();
+      const skillId = target.dataset.id;
+      if (state.primary.type === 'playbook') {
+        state.lastPlaybookId = state.primary.id;
+      }
+      selectSkill(skillId);
+      showToast(`已切换为单跑模式：/${skillId}`);
+      break;
+    }
+    case 'copy-skill-slash': {
+      e.stopPropagation();
+      const skillId = target.dataset.id;
+      const sk = findSkill(skillId);
+      if (sk) {
+        void copyTextRaw(sk.slash, `已复制技能命令 ${sk.slash}`);
+        recordExplicitSkillUsage(skillId);
+      }
+      break;
+    }
+    case 'return-to-playbook': {
+      selectPlaybook(state.lastPlaybookId || 'bug-fix');
+      break;
+    }
     case 'toggle-principle': {
       toggleArrayItem(state.principles, target.dataset.id);
       syncMarkdownFromOptions();
@@ -2480,6 +2783,14 @@ function handleDelegatedClick(e) {
     case 'toggle-customize': {
       state.customizeOpen = !state.customizeOpen;
       renderStageRegion();
+      break;
+    }
+    case 'toggle-shelf-layer': {
+      const layer = target.dataset.layer;
+      if (layer && Object.prototype.hasOwnProperty.call(state.layerOpen, layer)) {
+        state.layerOpen[layer] = !state.layerOpen[layer];
+        renderStageRegion();
+      }
       break;
     }
     case 'toggle-shelf-skills': {
@@ -2507,6 +2818,7 @@ function handleDelegatedClick(e) {
     }
     case 'reset-markdown': {
       state.activeNodeId = null;
+      state.goal = '';
       resetMarkdownFromState();
       renderStageRegion();
       showToast('已重置为当前组合的默认 Markdown 指令');
@@ -2751,8 +3063,19 @@ async function init() {
   });
   applyUiPreferences();
 
+  if (window.sidecar?.getWorkspaceUris) {
+    try {
+      state.workspaceUris = (await window.sidecar.getWorkspaceUris()) || [];
+    } catch {
+      state.workspaceUris = [];
+    }
+  }
+
   try {
-    const res = await apiFetch('/api/catalog', { method: 'POST', body: '{}' });
+    const res = await apiFetch('/api/catalog', {
+      method: 'POST',
+      body: JSON.stringify({ workspaceUris: state.workspaceUris }),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.catalog = await res.json();
   } catch (err) {
@@ -2785,10 +3108,11 @@ async function init() {
   void resolveProjectId();
 
   if (window.sidecar?.getWorkspaceUris) {
-    const uris = await window.sidecar.getWorkspaceUris();
-    await refreshHealth(uris);
+    await refreshHealth(state.workspaceUris);
     window.sidecar.onWorkspaceChange?.((nextUris) => {
-      void refreshHealth(nextUris);
+      state.workspaceUris = Array.isArray(nextUris) ? nextUris : [];
+      void refreshHealth(state.workspaceUris);
+      void refreshCatalogLive(false);
     });
   } else {
     await refreshHealth([]);

@@ -106,6 +106,20 @@ export function markdownToWysiwygHtml(markdown) {
       continue;
     }
 
+    if (i === 0 && !/^(?:\/[a-z0-9-]+\s+)*\/poteto-mode\b/.test(trimmed)) {
+      const soloSkillMatch = line.match(
+        /^((?:\/[a-z0-9-]+\s+)*\/[a-z][a-z0-9-]*(?:（技能定义见\s*`[^`]+`）|\s*\(read skill definition from `[^`]+`\))?\s+(?:【新任务】\s*|New task:\s*)?)(.+)$/
+      );
+      if (soloSkillMatch) {
+        const prefixHtml = renderInlineMarkdown(soloSkillMatch[1]);
+        const rawVal = soloSkillMatch[2].trim();
+        const isPlaceholder = /^<.+>$/.test(rawVal);
+        const cls = isPlaceholder ? 'md-goal-slot md-placeholder' : 'md-goal-slot';
+        out.push(`<p class="md-p">${prefixHtml}<span class="${cls}">${escHtml(rawVal)}</span></p>`);
+        continue;
+      }
+    }
+
     out.push(`<p class="md-p">${renderInlineMarkdown(line)}</p>`);
   }
 
@@ -213,6 +227,34 @@ function isManagedHeaderLine(line) {
     /^(?:\/[a-z0-9-]+\s+)*\/poteto-mode\b/.test(t) ||
     /^(?:\/[a-z0-9-]+\s+)*\/[a-z][a-z0-9-]*\b/.test(t)
   );
+}
+
+/**
+ * Extracts the user's typed goal text (the blue `.md-goal-slot` content) from a
+ * Markdown prompt, returning `''` if only the default `<...>` placeholder exists.
+ */
+export function extractUserGoalFromMarkdown(markdown) {
+  const normalized = String(markdown || '').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const goalMatch = line.match(/^(?:任务目标：|Goal:\s*)(.+)$/);
+    if (goalMatch) {
+      const val = goalMatch[1].trim();
+      return /^<.+>$/.test(val) ? '' : val;
+    }
+    if (i === 0 && !/^(?:\/[a-z0-9-]+\s+)*\/poteto-mode\b/.test(line)) {
+      const soloSkillMatch = line.match(
+        /^(?:\/[a-z0-9-]+\s+)*\/[a-z][a-z0-9-]*(?:（技能定义见\s*`[^`]+`）|\s*\(read skill definition from `[^`]+`\))?\s+(?:【新任务】\s*|New task:\s*)?(.+)$/
+      );
+      if (soloSkillMatch) {
+        const val = soloSkillMatch[1].trim();
+        return /^<.+>$/.test(val) ? '' : val;
+      }
+    }
+  }
+  return '';
 }
 
 /**
