@@ -8,20 +8,30 @@ import { AGENT_META, PLAYBOOK_META, PRINCIPLE_META, SKILL_META } from '../backen
 import { checkWorkspaceHealth } from '../backend/workspace-health.mjs';
 import { composePrompt } from '../shared/prompt-composer.mjs';
 import { layoutFlowchart, renderFlowchartSvg, toMermaidCode } from '../shared/flowchart-svg.mjs';
-import { markdownToWysiwygHtml, syncComposedIntoUserMarkdown } from '../shared/markdown-wysiwyg.mjs';
+import {
+  extractUserGoalFromMarkdown,
+  markdownToWysiwygHtml,
+  syncComposedIntoUserMarkdown,
+} from '../shared/markdown-wysiwyg.mjs';
 import { createStandaloneStudioServer } from '../standalone.mjs';
 
 test('buildCatalog discovers all 22 playbooks, 33 workflow skills, 24 principles, and 2 agents with 100% metadata alignment', () => {
   const emptyUserDir = mkdtempSync(join(tmpdir(), 'pstack-studio-clean-'));
+  const emptyGeminiDir = join(emptyUserDir, 'gemini-cfg');
   let catalog;
   try {
-    catalog = buildCatalog(DEFAULT_PLUGIN_ROOT, { userDir: emptyUserDir });
+    catalog = buildCatalog(DEFAULT_PLUGIN_ROOT, {
+      userDir: emptyUserDir,
+      geminiConfigDir: emptyGeminiDir,
+    });
   } finally {
     rmSync(emptyUserDir, { recursive: true, force: true });
   }
 
   assert.equal(catalog.counts.playbooks, 22);
   assert.equal(catalog.counts.skills, 33);
+  assert.equal(catalog.skills.filter((s) => !s.inAnyPlaybook).length, 21);
+  assert.equal(catalog.skills.filter((s) => s.inAnyPlaybook).length, 12);
   assert.equal(catalog.counts.principles, 24);
   assert.equal(catalog.counts.agents, 2);
   assert.equal(catalog.counts.recipes, 12);
@@ -337,6 +347,22 @@ test('markdown WYSIWYG renders formatted HTML and preserves user edits when sync
   assert.match(synced, /\/architect、\/interrogate/);
   assert.match(synced, /principle-laziness-protocol/);
   assert.match(synced, /先给出数据结构、接口设计与权衡方案供审阅/);
+
+  // Switching playbooks (e.g. babysit -> eval) preserves extracted blue goal text while updating template
+  const babysitEdited = composePrompt(
+    { primary: { type: 'playbook', id: 'babysit' }, goal: '跟进 PR #420 的 CI 偶发超时', lang: 'zh' },
+    catalog
+  ).prompt;
+  const preservedGoal = extractUserGoalFromMarkdown(babysitEdited);
+  assert.equal(preservedGoal, '跟进 PR #420 的 CI 偶发超时');
+  const evalPrompt = composePrompt(
+    { primary: { type: 'playbook', id: 'eval' }, goal: preservedGoal, lang: 'zh' },
+    catalog
+  ).prompt;
+  assert.match(evalPrompt, /Eval/);
+  assert.match(evalPrompt, /任务目标：跟进 PR #420 的 CI 偶发超时/);
+  assert.match(markdownToWysiwygHtml(evalPrompt), /<span class="md-goal-slot">跟进 PR #420 的 CI 偶发超时<\/span>/);
+  assert.equal(extractUserGoalFromMarkdown(initial), '');
 });
 
 test('clicking a playbook flowchart node focuses the prompt on that step or decision branch without losing user text', () => {
@@ -388,19 +414,32 @@ test('clicking a playbook flowchart node focuses the prompt on that step or deci
 test('user-space settings, external skill folder mounting, custom playbook/principle overlay, and usage tracking APIs', async () => {
   const tempRoot = mkdtempSync(join(tmpdir(), 'pstack-studio-user-'));
   const userDir = join(tempRoot, 'user-studio');
+  const geminiConfigDir = join(tempRoot, 'gemini-config');
+  const workspaceDir = join(tempRoot, 'demo-workspace');
   const externalMultiDir = join(tempRoot, 'team-skills');
   const externalSingleDir = join(tempRoot, 'solo-skill');
 
-  // Create external skills (multi-folder + single-folder) and a custom playbook
+  // Create external skills (one with explicit author, one without -> Other)
   mkdirSync(join(externalMultiDir, 'db-migrate'), { recursive: true });
   writeFileSync(
     join(externalMultiDir, 'db-migrate', 'SKILL.md'),
-    '---\nname: db-migrate\ntitleZh: 数据库迁移生成\ndescription: Generate safe SQL migrations\n---\n\n# db-migrate\n'
+    '---\nname: db-migrate\nauthor: bob\ntitleZh: 数据库迁移生成\ndescription: Generate safe SQL migrations\n---\n\n# db-migrate\n'
   );
   mkdirSync(externalSingleDir, { recursive: true });
   writeFileSync(
     join(externalSingleDir, 'SKILL.md'),
     '---\nname: solo-skill\ntitleZh: 单目录独立技能\ndescription: Single folder skill\n---\n\n# solo-skill\n'
+  );
+  // Create Antigravity default-loaded global & workspace skills
+  mkdirSync(join(geminiConfigDir, 'skills', 'global-helper'), { recursive: true });
+  writeFileSync(
+    join(geminiConfigDir, 'skills', 'global-helper', 'SKILL.md'),
+    '---\nname: global-helper\ntitleZh: 全局默认技能\ndescription: Auto-discovered global skill\n---\n\n# global-helper\n'
+  );
+  mkdirSync(join(workspaceDir, '.agents', 'skills', 'verify-demo'), { recursive: true });
+  writeFileSync(
+    join(workspaceDir, '.agents', 'skills', 'verify-demo', 'SKILL.md'),
+    '---\nname: verify-demo\nauthor: alice\ntitleZh: 项目实测验证\ndescription: Auto-discovered workspace verify skill\n---\n\n# verify-demo\n'
   );
   mkdirSync(join(userDir, 'playbooks'), { recursive: true });
   writeFileSync(
@@ -420,7 +459,8 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
       '# Release Gate',
       '',
       '1. 变更影响分析：执行 /blast-radius 检查上下游。',
-      '2. 对抗审查：执行 /interrogate 挑战关键风险。',
+      '2. 数据库变更：运行 /db-migrate 生成安全迁移脚本。',
+      '3. 对抗审查：执行 /interrogate 挑战关键风险。',
       '',
       '**Reply:** 汇总门禁结果。',
     ].join('\n')
@@ -429,7 +469,9 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
   const srv = createStandaloneStudioServer({
     port: 0,
     pluginRoot: DEFAULT_PLUGIN_ROOT,
+    workspacePath: workspaceDir,
     userDir,
+    geminiConfigDir,
   });
   const info = await srv.start();
   try {
@@ -472,12 +514,41 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
     const prinJson = await prinRes.json();
     assert.equal(prinJson.created.id, 'principle-api-compat');
 
-    // 4. Verify merged catalog includes custom playbook (with auto SVG graph), external skills, and custom principle
+    // 4. Verify merged catalog includes custom playbook, external skills, auto-discovered default skills, and author tags
     const catRes = await fetch(`${info.url}/api/catalog`);
     const cat = await catRes.json();
     assert.equal(cat.counts.playbooks, 23);
-    assert.equal(cat.counts.skills, 35);
+    assert.equal(cat.counts.skills, 37);
     assert.equal(cat.counts.principles, 25);
+
+    const builtinSk = cat.skills.find((s) => s.id === 'interrogate');
+    assert.equal(builtinSk.author, 'poteto');
+    assert.equal(builtinSk.inAnyPlaybook, true);
+    const authoredExt = cat.skills.find((s) => s.id === 'db-migrate');
+    assert.equal(authoredExt.author, 'bob');
+    assert.equal(authoredExt.authorLabel, '@bob');
+    // Referenced by custom playbook `release-gate.md`, so excluded from standalone addon skills
+    assert.equal(authoredExt.inAnyPlaybook, true);
+    assert.ok(authoredExt.usedInPlaybooks.includes('release-gate'));
+    const blastSk = cat.skills.find((s) => s.id === 'blast-radius');
+    assert.equal(blastSk.inAnyPlaybook, true);
+    assert.ok(blastSk.usedInPlaybooks.includes('release-gate'));
+    const unauthoredExt = cat.skills.find((s) => s.id === 'solo-skill');
+    assert.equal(unauthoredExt.author, 'other');
+    assert.equal(unauthoredExt.authorLabel, 'Other');
+    assert.equal(unauthoredExt.inAnyPlaybook, false);
+    const autoGlobalSk = cat.skills.find((s) => s.id === 'global-helper');
+    assert.ok(autoGlobalSk && autoGlobalSk.origin === 'global' && autoGlobalSk.author === 'other');
+    const autoWsSk = cat.skills.find((s) => s.id === 'verify-demo');
+    assert.ok(autoWsSk && autoWsSk.origin === 'workspace' && autoWsSk.author === 'alice');
+
+    const autoSrcRes = await fetch(`${info.url}/api/source`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relPath: autoWsSk.relPath }),
+    });
+    assert.equal(autoSrcRes.status, 200);
+    assert.match((await autoSrcRes.json()).content, /Auto-discovered workspace verify skill/);
 
     const customPb = cat.playbooks.find((p) => p.id === 'release-gate');
     assert.ok(customPb && customPb.origin === 'custom');
@@ -488,7 +559,7 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
     assert.equal(builtinPb.attribution.author, 'poteto');
     assert.equal(builtinPb.attribution.pack, 'Cursor pstack');
     assert.equal(builtinPb.attribution.theme, 'poteto');
-    assert.ok(customPb.graph && customPb.graph.rows.length === 2);
+    assert.ok(customPb.graph && customPb.graph.rows.length === 3);
     assert.match(renderFlowchartSvg(customPb.graph), /^<svg/);
 
     // Prompt composer cites exact file paths for custom playbook & external skills
