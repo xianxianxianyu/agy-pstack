@@ -97,10 +97,16 @@ export function createStandaloneStudioServer({
   pluginRoot = DEFAULT_PLUGIN_ROOT,
   workspacePath = DEFAULT_PLUGIN_ROOT,
   userDir,
+  geminiConfigDir,
 } = {}) {
   const dispatchedMessages = [];
   const defaultWsUri = workspacePath ? `file://${workspacePath}` : '';
-  const catalogOpts = userDir ? { userDir } : {};
+  const buildCatalogOpts = (data = {}) => ({
+    ...(userDir ? { userDir } : {}),
+    ...(geminiConfigDir ? { geminiConfigDir } : {}),
+    workspaceUris: Array.isArray(data?.workspaceUris) ? data.workspaceUris : [],
+    fallbackWorkspacePath: workspacePath,
+  });
 
   const server = createServer((req, res) => {
     const url = new URL(req.url || '/', `http://${host}`);
@@ -153,7 +159,7 @@ export function createStandaloneStudioServer({
         return;
       }
       if (url.pathname === '/api/catalog') {
-        return sendJson(200, buildCatalog(pluginRoot, catalogOpts));
+        return sendJson(200, buildCatalog(pluginRoot, buildCatalogOpts()));
       }
       if (url.pathname === '/api/debug-dispatched') {
         return sendJson(200, { items: dispatchedMessages });
@@ -168,8 +174,9 @@ export function createStandaloneStudioServer({
       req.on('end', () => {
         try {
           const data = body ? JSON.parse(body) : {};
+          const opts = buildCatalogOpts(data);
           if (url.pathname === '/api/catalog') {
-            return sendJson(200, buildCatalog(pluginRoot, catalogOpts));
+            return sendJson(200, buildCatalog(pluginRoot, opts));
           }
           if (url.pathname === '/api/health') {
             return sendJson(
@@ -181,7 +188,7 @@ export function createStandaloneStudioServer({
             );
           }
           if (url.pathname === '/api/source') {
-            return sendJson(200, readCatalogSourceFile(data.relPath, pluginRoot, catalogOpts));
+            return sendJson(200, readCatalogSourceFile(data.relPath, pluginRoot, opts));
           }
           if (url.pathname === '/api/settings') {
             return sendJson(200, {
@@ -194,7 +201,7 @@ export function createStandaloneStudioServer({
             return sendJson(200, {
               ok: true,
               settings,
-              catalog: buildCatalog(pluginRoot, catalogOpts),
+              catalog: buildCatalog(pluginRoot, opts),
             });
           }
           if (url.pathname === '/api/settings/skill-dirs/add') {
@@ -202,7 +209,7 @@ export function createStandaloneStudioServer({
             return sendJson(200, {
               ok: true,
               ...added,
-              catalog: buildCatalog(pluginRoot, catalogOpts),
+              catalog: buildCatalog(pluginRoot, opts),
             });
           }
           if (url.pathname === '/api/settings/skill-dirs/remove') {
@@ -210,7 +217,7 @@ export function createStandaloneStudioServer({
             return sendJson(200, {
               ok: true,
               settings,
-              catalog: buildCatalog(pluginRoot, catalogOpts),
+              catalog: buildCatalog(pluginRoot, opts),
             });
           }
           if (url.pathname === '/api/settings/create-principle') {
@@ -218,7 +225,7 @@ export function createStandaloneStudioServer({
             return sendJson(200, {
               ok: true,
               created,
-              catalog: buildCatalog(pluginRoot, catalogOpts),
+              catalog: buildCatalog(pluginRoot, opts),
             });
           }
           if (url.pathname === '/api/settings/delete-item') {
@@ -226,7 +233,7 @@ export function createStandaloneStudioServer({
             return sendJson(200, {
               ok: true,
               removed,
-              catalog: buildCatalog(pluginRoot, catalogOpts),
+              catalog: buildCatalog(pluginRoot, opts),
             });
           }
           if (url.pathname === '/api/usage/record') {

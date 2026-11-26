@@ -36,19 +36,20 @@ const BACKEND_DIR = join(__dirname, 'backend');
 let cachedCatalogKey = '';
 let cachedCatalogData = null;
 
-async function getLiveCatalog(forceReload = false) {
+async function getLiveCatalog({ forceReload = false, workspaceUris = [] } = {}) {
   const m1 = statSync(join(BACKEND_DIR, 'metadata-zh.mjs')).mtimeMs;
   const m2 = statSync(join(BACKEND_DIR, 'catalog-builder.mjs')).mtimeMs;
   const m3 = statSync(join(BACKEND_DIR, 'playbook-graphs.mjs')).mtimeMs;
   const m4 = statSync(join(BACKEND_DIR, 'user-store.mjs')).mtimeMs;
   const userSig = getUserStoreMtimeSignature();
-  const key = `${m1}:${m2}:${m3}:${m4}:${userSig}`;
+  const wsKey = Array.isArray(workspaceUris) ? workspaceUris.join(',') : '';
+  const key = `${m1}:${m2}:${m3}:${m4}:${userSig}:${wsKey}`;
   if (!forceReload && key === cachedCatalogKey && cachedCatalogData) {
     return cachedCatalogData;
   }
   const builderUrl = pathToFileURL(join(BACKEND_DIR, 'catalog-builder.mjs')).href;
   const mod = await import(`${builderUrl}?v=${m1}_${m2}_${m3}_${m4}`);
-  cachedCatalogData = mod.buildCatalog(DEFAULT_PLUGIN_ROOT);
+  cachedCatalogData = mod.buildCatalog(DEFAULT_PLUGIN_ROOT, { workspaceUris });
   cachedCatalogKey = key;
   return cachedCatalogData;
 }
@@ -115,7 +116,10 @@ app.page('/shared/markdown-wysiwyg.mjs', () =>
 );
 
 app.api('/api/catalog', () => getLiveCatalog(), 'GET');
-app.api('/api/catalog', (data) => getLiveCatalog(Boolean(data?.force)), 'POST');
+app.api('/api/catalog', (data) => getLiveCatalog({
+  forceReload: Boolean(data?.force),
+  workspaceUris: Array.isArray(data?.workspaceUris) ? data.workspaceUris : [],
+}), 'POST');
 
 app.api('/api/health', (data) => {
   const workspaceUris = Array.isArray(data?.workspaceUris) ? data.workspaceUris : [];
@@ -123,7 +127,9 @@ app.api('/api/health', (data) => {
 }, 'POST');
 
 app.api('/api/source', (data) => {
-  return readCatalogSourceFile(data?.relPath, DEFAULT_PLUGIN_ROOT);
+  return readCatalogSourceFile(data?.relPath, DEFAULT_PLUGIN_ROOT, {
+    workspaceUris: Array.isArray(data?.workspaceUris) ? data.workspaceUris : [],
+  });
 }, 'POST');
 
 app.api('/api/settings', () => ({
@@ -133,31 +139,31 @@ app.api('/api/settings', () => ({
 
 app.api('/api/settings/ui', async (data) => {
   const settings = updateUiSettings(data || {});
-  const catalog = await getLiveCatalog(true);
+  const catalog = await getLiveCatalog({ forceReload: true, workspaceUris: data?.workspaceUris || [] });
   return { ok: true, settings, catalog };
 }, 'POST');
 
 app.api('/api/settings/skill-dirs/add', async (data) => {
   const res = addSkillDir({ path: data?.path, label: data?.label });
-  const catalog = await getLiveCatalog(true);
+  const catalog = await getLiveCatalog({ forceReload: true, workspaceUris: data?.workspaceUris || [] });
   return { ok: true, ...res, catalog };
 }, 'POST');
 
 app.api('/api/settings/skill-dirs/remove', async (data) => {
   const settings = removeSkillDir(data?.path);
-  const catalog = await getLiveCatalog(true);
+  const catalog = await getLiveCatalog({ forceReload: true, workspaceUris: data?.workspaceUris || [] });
   return { ok: true, settings, catalog };
 }, 'POST');
 
 app.api('/api/settings/create-principle', async (data) => {
   const created = createUserPrinciple(data || {});
-  const catalog = await getLiveCatalog(true);
+  const catalog = await getLiveCatalog({ forceReload: true, workspaceUris: data?.workspaceUris || [] });
   return { ok: true, created, catalog };
 }, 'POST');
 
 app.api('/api/settings/delete-item', async (data) => {
   const removed = deleteUserItem({ kind: data?.kind, id: data?.id });
-  const catalog = await getLiveCatalog(true);
+  const catalog = await getLiveCatalog({ forceReload: true, workspaceUris: data?.workspaceUris || [] });
   return { ok: true, removed, catalog };
 }, 'POST');
 

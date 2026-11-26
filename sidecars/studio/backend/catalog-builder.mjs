@@ -11,6 +11,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -28,6 +29,7 @@ import {
 import { PLAYBOOK_GRAPHS } from './playbook-graphs.mjs';
 import {
   discoverSkillsInDirectory,
+  expandHomePath,
   getUserStudioPaths,
   readUsageStats,
   readUserConfig,
@@ -267,6 +269,96 @@ function parseCsvAttr(val) {
     .filter(Boolean);
 }
 
+function normalizeSkillAuthor(attributes = {}) {
+  const raw = String(attributes.author || '').trim().replace(/^@/, '');
+  if (!raw) {
+    return { author: 'other', authorLabel: 'Other' };
+  }
+  const clean = raw.toLowerCase();
+  if (clean === 'poteto') {
+    return { author: 'poteto', authorLabel: '@poteto · Cursor pstack' };
+  }
+  return { author: raw, authorLabel: `@${raw}` };
+}
+
+function uriToLocalPath(uri) {
+  const s = String(uri || '').trim();
+  if (!s) return '';
+  if (s.startsWith('file://')) {
+    try {
+      return decodeURIComponent(new URL(s).pathname);
+    } catch {
+      return s.slice('file://'.length);
+    }
+  }
+  return s;
+}
+
+function readSkillsJsonEntryDirs(jsonPath, baseDir) {
+  if (!existsSync(jsonPath)) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(jsonPath, 'utf-8'));
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+    const dirs = [];
+    for (const entry of entries) {
+      const p = typeof entry === 'string' ? entry : entry?.path;
+      if (!p || !String(p).trim()) continue;
+      const trimmed = String(p).trim();
+      const resolved =
+        trimmed.startsWith('/') || trimmed.startsWith('~')
+          ? expandHomePath(trimmed)
+          : resolve(baseDir, trimmed);
+      if (resolved && existsSync(resolved)) dirs.push(resolved);
+    }
+    return dirs;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Collects Antigravity's default-loaded skill directories:
+ * - Global: `~/.gemini/config/skills/` and `~/.gemini/config/skills.json`
+ * - Workspace: `<ws>/.agents/skills/` and `<ws>/.agents/skills.json`
+ */
+function collectDefaultLoadedSkillDirs({ geminiConfigDir, workspaceUris = [], fallbackWorkspacePath = '' } = {}) {
+  const globalCfgDir = geminiConfigDir
+    ? resolve(geminiConfigDir)
+    : join(homedir(), '.gemini', 'config');
+  const results = [];
+  const seen = new Set();
+  const pushDir = (dirPath, origin, sourceLabel) => {
+    const abs = resolve(dirPath);
+    if (seen.has(abs) || !existsSync(abs)) return;
+    seen.add(abs);
+    results.push({ absPath: abs, origin, sourceLabel });
+  };
+
+  // 1. Active workspace(s) `.agents/skills` & `.agents/skills.json`
+  const wsPaths = workspaceUris.map(uriToLocalPath).filter(Boolean);
+  if (wsPaths.length === 0 && fallbackWorkspacePath) {
+    wsPaths.push(resolve(fallbackWorkspacePath));
+  }
+  for (const ws of wsPaths) {
+    const wsName = basename(ws) || '工作区';
+    for (const dotDir of ['.agents', '.agent']) {
+      const dotPath = join(ws, dotDir);
+      pushDir(join(dotPath, 'skills'), 'workspace', `项目 · ${wsName}`);
+      for (const extraDir of readSkillsJsonEntryDirs(join(dotPath, 'skills.json'), ws)) {
+        pushDir(extraDir, 'workspace', `项目配置 · ${wsName}`);
+      }
+    }
+  }
+
+  // 2. Global `~/.gemini/config/skills` & `~/.gemini/config/skills.json`
+  pushDir(join(globalCfgDir, 'skills'), 'global', '全局默认技能');
+  for (const extraDir of readSkillsJsonEntryDirs(join(globalCfgDir, 'skills.json'), globalCfgDir)) {
+    pushDir(extraDir, 'global', '全局配置技能');
+  }
+
+  return results;
+}
+
 /**
  * Generates a clean clickable linear SVG flowchart topology for custom playbooks
  * that do not provide an explicit `<slug>.graph.json`.
@@ -350,12 +442,16 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       relPath,
       sourceFilePath: absPath,
       origin: 'builtin',
+      author: 'poteto',
+      authorLabel: '@poteto · Cursor pstack',
+      attribution: POTETO_ATTRIBUTION,
       lineCount: raw.split('\n').length,
       previewExcerpt: body.split('\n').slice(0, 12).join('\n'),
     };
   });
 
-  // 2b. Discover User Custom Skills (`~/.gemini/config/pstack-studio/skills/`) & External Mounted Skill Dirs
+  // 2b. Discover User Custom Skills (`~/.gemini/config/pstack-studio/skills/`),
+  // External Mounted Skill Dirs, and Antigravity Default-Loaded Global/Workspace Skills
   const seenSkillIds = new Set(builtinWorkflowSkillIds);
   const customSkillsList = [];
 
@@ -371,6 +467,13 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
     const titleZh = attributes.titleZh || attributes.title || attributes.name || id;
     const titleEn = attributes.titleEn || attributes.name || id;
     const desc = attributes.shortDesc || attributes.description || `来自 ${sourceLabel} 的扩展技能`;
+    const { author, authorLabel } = normalizeSkillAuthor(attributes);
+    const roleTagMap = {
+      external: `外部 · ${sourceLabel}`,
+      workspace: sourceLabel,
+      global: sourceLabel,
+      custom: '自定义技能',
+    };
     customSkillsList.push({
       id,
       slash: `/${id}`,
@@ -379,7 +482,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       titleEn,
       shortDesc: desc.slice(0, 90),
       scenario: attributes.scenario || 'build',
-      roleTag: origin === 'external' ? `外部 · ${sourceLabel}` : '自定义技能',
+      roleTag: roleTagMap[origin] || '扩展技能',
       descriptionEn: attributes.description || '',
       whenToUse: attributes.whenToUse || attributes.description || desc,
       vsHint: null,
@@ -389,6 +492,9 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       sourceFilePath: entry.filePath,
       sourceLabel,
       origin,
+      author,
+      authorLabel,
+      attribution: author === 'poteto' ? POTETO_ATTRIBUTION : buildCustomAttribution({ ...attributes, author: author === 'other' ? sourceLabel : author }),
       lineCount: raw.split('\n').length,
       previewExcerpt: body.split('\n').slice(0, 12).join('\n'),
     });
@@ -426,6 +532,34 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       loadedIds,
       skippedConflicts,
     };
+  });
+
+  // 2c. Auto-discover Antigravity default-loaded Global & Workspace skills
+  const defaultLoadedDirs = collectDefaultLoadedSkillDirs({
+    geminiConfigDir: options?.geminiConfigDir,
+    workspaceUris: Array.isArray(options?.workspaceUris) ? options.workspaceUris : [],
+    fallbackWorkspacePath: options?.fallbackWorkspacePath || '',
+  });
+  const defaultSkillSources = [];
+  defaultLoadedDirs.forEach((d, dIdx) => {
+    const scan = discoverSkillsInDirectory(d.absPath);
+    const loadedIds = [];
+    for (const entry of scan.skills) {
+      const res = appendDiscoveredSkill(entry, {
+        origin: d.origin,
+        sourceLabel: d.sourceLabel,
+        relPath: `auto:${dIdx}:${entry.id}`,
+      });
+      if (res.added) loadedIds.push(entry.id);
+    }
+    if (loadedIds.length > 0) {
+      defaultSkillSources.push({
+        path: d.absPath,
+        origin: d.origin,
+        label: d.sourceLabel,
+        loadedIds,
+      });
+    }
   });
 
   const skills = [...builtinSkillsList, ...customSkillsList];
@@ -679,6 +813,36 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
     return a.id.localeCompare(b.id);
   });
 
+  // 4b. Annotate each skill with all playbooks (built-in + custom) that reference it
+  const skillPlaybookUsage = new Map();
+  const markSkillUsedInPlaybook = (skillId, pbId) => {
+    const cleanId = String(skillId || '').replace(/^\//, '').trim();
+    if (!cleanId) return;
+    if (!skillPlaybookUsage.has(cleanId)) skillPlaybookUsage.set(cleanId, []);
+    const list = skillPlaybookUsage.get(cleanId);
+    if (!list.includes(pbId)) list.push(pbId);
+  };
+  for (const pb of playbooks) {
+    for (const skId of pb.builtinSkills || []) {
+      markSkillUsedInPlaybook(skId, pb.id);
+    }
+    if (pb.graph) {
+      for (const row of pb.graph.rows || []) {
+        for (const n of row) {
+          for (const tok of n.mounts || []) {
+            if (typeof tok === 'string' && tok.startsWith('/')) {
+              markSkillUsedInPlaybook(tok.slice(1), pb.id);
+            }
+          }
+        }
+      }
+    }
+  }
+  for (const sk of skills) {
+    sk.usedInPlaybooks = skillPlaybookUsage.get(sk.id) || [];
+    sk.inAnyPlaybook = sk.usedInPlaybooks.length > 0;
+  }
+
   // 5. Discover Subagents
   const agentFiles = existsSync(agentsDir)
     ? readdirSync(agentsDir).filter((f) => f.endsWith('.md')).sort()
@@ -725,6 +889,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
     settings: {
       ui: userConfig.ui,
       skillDirs: enrichedSkillDirs,
+      defaultSkillSources,
     },
     usage,
     scenarios: SCENARIOS,
@@ -786,6 +951,34 @@ export function readCatalogSourceFile(relPath, pluginRoot = DEFAULT_PLUGIN_ROOT,
     const found = scan.skills.find((s) => s.id === skillId);
     if (!found || !existsSync(found.filePath)) {
       throw new Error(`External skill not found: ${skillId}`);
+    }
+    return {
+      relPath: found.filePath,
+      absPath: found.filePath,
+      content: readFileSync(found.filePath, 'utf-8'),
+    };
+  }
+
+  if (rawRef.startsWith('auto:')) {
+    const match = rawRef.match(/^auto:(\d+):([A-Za-z0-9._-]+)$/);
+    if (!match) {
+      throw new Error('Invalid auto-discovered skill reference');
+    }
+    const dirIdx = Number(match[1]);
+    const skillId = match[2];
+    const autoDirs = collectDefaultLoadedSkillDirs({
+      geminiConfigDir: options?.geminiConfigDir,
+      workspaceUris: Array.isArray(options?.workspaceUris) ? options.workspaceUris : [],
+      fallbackWorkspacePath: options?.fallbackWorkspacePath || '',
+    });
+    const dirEntry = autoDirs[dirIdx];
+    if (!dirEntry) {
+      throw new Error('Auto-discovered skill directory not found');
+    }
+    const scan = discoverSkillsInDirectory(dirEntry.absPath);
+    const found = scan.skills.find((s) => s.id === skillId);
+    if (!found || !existsSync(found.filePath)) {
+      throw new Error(`Auto-discovered skill not found: ${skillId}`);
     }
     return {
       relPath: found.filePath,
