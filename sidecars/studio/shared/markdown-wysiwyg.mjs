@@ -37,9 +37,9 @@ export function renderInlineMarkdown(raw) {
         /&lt;([^&]{3,80})&gt;/g,
         '<span class="md-placeholder">&lt;$1&gt;</span>'
       );
-      // Leading or space-preceded /slash-commands
+      // Leading or space-preceded /slash-commands (supports hyphens and underscores like /generative_ui)
       h = h.replace(
-        /(^|\s)(\/[a-z][a-z0-9-]*)(?=[\s，。、.,:：]|$)/g,
+        /(^|\s)(\/[a-z][a-z0-9_-]*)(?=[\s，。、.,:：]|$)/g,
         '$1<span class="md-slash">$2</span>'
       );
       return h;
@@ -224,8 +224,8 @@ function isManagedConstraintLine(line, constraints) {
 function isManagedHeaderLine(line) {
   const t = line.trim();
   return (
-    /^(?:\/[a-z0-9-]+\s+)*\/poteto-mode\b/.test(t) ||
-    /^(?:\/[a-z0-9-]+\s+)*\/[a-z][a-z0-9-]*\b/.test(t)
+    /^(?:\/[a-z0-9_-]+\s+)*\/poteto-mode\b/.test(t) ||
+    /^(?:\/[a-z0-9_-]+\s+)*\/[a-z][a-z0-9_-]*\b/.test(t)
   );
 }
 

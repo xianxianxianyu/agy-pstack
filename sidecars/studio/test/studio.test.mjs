@@ -33,6 +33,10 @@ test('buildCatalog discovers all 22 playbooks, 33 workflow skills, 24 principles
   assert.equal(catalog.skills.filter((s) => !s.inAnyPlaybook).length, 21);
   assert.equal(catalog.skills.filter((s) => s.inAnyPlaybook).length, 12);
   assert.equal(catalog.counts.principles, 24);
+  assert.equal(catalog.nativeModifiers.length, 14);
+  for (const reqNative of ['boost', 'teamwork', 'run-workflow', 'schedule', 'generative_ui', 'automation', 'learn', 'compact', 'btw']) {
+    assert.ok(catalog.nativeModifiers.some((n) => n.id === reqNative), `Missing native modifier ${reqNative}`);
+  }
   assert.equal(catalog.counts.agents, 2);
   assert.equal(catalog.counts.recipes, 12);
 

@@ -1129,7 +1129,7 @@ function renderComposerBlock() {
       </div>
 
       <div id="host-hint-el" class="host-hint ${composed.hostOnlySlashes.length > 0 ? '' : 'hidden'}">
-        已附加客户端命令 <strong>${esc(composed.hostOnlySlashes.join(' '))}</strong>：建议点「复制」粘贴到输入框发送以激活原生循环模式，或直接发送作为文本提示词。
+        已附加客户端原生命令 <strong>${esc(composed.hostOnlySlashes.join(' '))}</strong>：建议在右下角下拉切到「复制到剪贴板」粘贴至输入框发送以激活客户端模式，或直接发送作为提示词。
       </div>
 
       ${state.customizeOpen ? renderCustomizeShelfHtml() : ''}
@@ -1273,8 +1273,9 @@ function renderCustomizeShelfHtml() {
         return merged;
       })();
 
-  const sessionModes = cat.nativeModifiers.filter((nm) => nm.hostInterceptOnly);
-  const runtimeEngines = cat.nativeModifiers.filter((nm) => !nm.hostInterceptOnly);
+  const sessionModes = cat.nativeModifiers.filter((nm) => (nm.group || (nm.hostInterceptOnly ? 'session' : 'engine')) === 'session');
+  const runtimeEngines = cat.nativeModifiers.filter((nm) => (nm.group || (nm.hostInterceptOnly ? 'session' : 'engine')) === 'engine');
+  const sessionOps = cat.nativeModifiers.filter((nm) => nm.group === 'ops');
 
   const nativeSelectedCount = state.nativeModifiers.length;
   const skillsSelectedCount = state.addonSkills.filter((id) => selectableSkillIdSet.has(id)).length;
@@ -1338,6 +1339,21 @@ function renderCustomizeShelfHtml() {
                   ${runtimeEngines.map(renderNativePill).join('')}
                 </div>
               </div>
+              ${
+                sessionOps.length > 0
+                  ? `
+                <div class="shelf-subgroup">
+                  <div class="shelf-subgroup-left">
+                    <span class="shelf-subgroup-tag">会话与自动化</span>
+                    <span class="skill-author-count">${sessionOps.length}</span>
+                  </div>
+                  <div class="shelf-pills">
+                    ${sessionOps.map(renderNativePill).join('')}
+                  </div>
+                </div>
+              `
+                  : ''
+              }
             </div>
           </div>
         `
