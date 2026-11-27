@@ -24,6 +24,7 @@ import {
   PLAYBOOK_META,
   PRINCIPLE_META,
   SCENARIOS,
+  SKILL_LINES,
   SKILL_META,
 } from './metadata-zh.mjs';
 import { PLAYBOOK_GRAPHS } from './playbook-graphs.mjs';
@@ -433,6 +434,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       titleEn: meta.titleEn || id,
       shortDesc: meta.shortDesc || meta.whenToUse || attributes.description || '',
       scenario: meta.scenario || 'build',
+      line: meta.line || 'engineering',
       roleTag: meta.roleTag || '工作流技能',
       descriptionEn: attributes.description || '',
       whenToUse: meta.whenToUse || attributes.description || '',
@@ -482,6 +484,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       titleEn,
       shortDesc: desc.slice(0, 90),
       scenario: attributes.scenario || 'build',
+      line: attributes.line || '',
       roleTag: roleTagMap[origin] || '扩展技能',
       descriptionEn: attributes.description || '',
       whenToUse: attributes.whenToUse || attributes.description || desc,
@@ -893,6 +896,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
     },
     usage,
     scenarios: SCENARIOS,
+    skillLines: SKILL_LINES,
     intentMatcher: INTENT_MATCHER,
     closeCalls: CLOSE_CALLS,
     constraints: CONSTRAINTS,

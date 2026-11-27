@@ -1486,17 +1486,36 @@ button.mount-pill:hover {
   background: color-mix(in srgb, var(--ps-accent) 16%, transparent);
 }
 
-/* Author-Grouped Skills Shelf + Scheme A Hover Lift & Floating Action Popover */
+/* Multi-Line Functional Skills Shelf + Scheme A Hover Lift & Floating Action Popover */
+.skill-line-groups,
 .skill-author-groups {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+.skill-line-block,
 .skill-author-block {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.skill-line-block + .skill-line-block {
+  padding-top: 9px;
+  border-top: 1px dashed color-mix(in srgb, var(--ps-fg) 7%, transparent);
+}
+
+.shelf-subgroup-tag.is-skill-line {
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.22);
+}
+
+:root[data-theme="dark"] .shelf-subgroup-tag.is-skill-line {
+  color: #c7d2fe;
+  background: rgba(129, 140, 248, 0.14);
+  border-color: rgba(165, 180, 252, 0.28);
 }
 
 .skill-author-head {

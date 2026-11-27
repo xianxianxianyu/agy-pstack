@@ -15,7 +15,7 @@ import {
 } from '../shared/markdown-wysiwyg.mjs';
 import { createStandaloneStudioServer } from '../standalone.mjs';
 
-test('buildCatalog discovers all 22 playbooks, 33 workflow skills, 24 principles, and 2 agents with 100% metadata alignment', () => {
+test('buildCatalog discovers all 23 playbooks, 35 workflow skills, 24 principles, and 2 agents with 100% metadata alignment', () => {
   const emptyUserDir = mkdtempSync(join(tmpdir(), 'pstack-studio-clean-'));
   const emptyGeminiDir = join(emptyUserDir, 'gemini-cfg');
   let catalog;
@@ -28,10 +28,25 @@ test('buildCatalog discovers all 22 playbooks, 33 workflow skills, 24 principles
     rmSync(emptyUserDir, { recursive: true, force: true });
   }
 
-  assert.equal(catalog.counts.playbooks, 22);
-  assert.equal(catalog.counts.skills, 33);
+  assert.equal(catalog.counts.playbooks, 23);
+  assert.equal(catalog.counts.skills, 35);
   assert.equal(catalog.skills.filter((s) => !s.inAnyPlaybook).length, 21);
-  assert.equal(catalog.skills.filter((s) => s.inAnyPlaybook).length, 12);
+  assert.equal(catalog.skills.filter((s) => s.inAnyPlaybook).length, 14);
+  assert.equal(catalog.skillLines.length, 4);
+  const validLineIds = new Set(catalog.skillLines.map((l) => l.id));
+  const standaloneLineCounts = {};
+  for (const sk of catalog.skills) {
+    assert.ok(validLineIds.has(sk.line), `Skill ${sk.id} missing valid line: ${sk.line}`);
+    if (!sk.inAnyPlaybook) {
+      standaloneLineCounts[sk.line] = (standaloneLineCounts[sk.line] || 0) + 1;
+    }
+  }
+  assert.deepEqual(standaloneLineCounts, {
+    verify: 6,
+    understand: 6,
+    retro: 5,
+    engineering: 4,
+  });
   assert.equal(catalog.counts.principles, 24);
   assert.equal(catalog.nativeModifiers.length, 14);
   for (const reqNative of ['boost', 'teamwork', 'run-workflow', 'schedule', 'generative_ui', 'automation', 'learn', 'compact', 'btw']) {
@@ -189,13 +204,19 @@ test('composePrompt generates structured zh/en prompts and flags host-only modif
 });
 
 test('standalone server serves catalog, health, source, and dispatch preview endpoints', async () => {
-  const srv = createStandaloneStudioServer({ port: 0, pluginRoot: DEFAULT_PLUGIN_ROOT });
+  const cleanRoot = mkdtempSync(join(tmpdir(), 'pstack-studio-srv-'));
+  const srv = createStandaloneStudioServer({
+    port: 0,
+    pluginRoot: DEFAULT_PLUGIN_ROOT,
+    userDir: join(cleanRoot, 'user'),
+    geminiConfigDir: join(cleanRoot, 'gemini'),
+  });
   const info = await srv.start();
   try {
     const catRes = await fetch(`${info.url}/api/catalog`);
     assert.equal(catRes.status, 200);
     const catJson = await catRes.json();
-    assert.equal(catJson.counts.playbooks, 22);
+    assert.equal(catJson.counts.playbooks, 23);
 
     for (const assetPath of ['/', '/styles.css', '/app.js', '/shared/prompt-composer.mjs', '/shared/flowchart-svg.mjs', '/shared/markdown-wysiwyg.mjs', '/preload.js']) {
       const assetRes = await fetch(`${info.url}${assetPath}`);
@@ -228,11 +249,21 @@ test('standalone server serves catalog, health, source, and dispatch preview end
     assert.equal(srv.dispatchedMessages[0].message, '/how explain studio');
   } finally {
     await srv.stop();
+    rmSync(cleanRoot, { recursive: true, force: true });
   }
 });
 
 test('anti-slop structural gate: zero decorative emojis, concise shortDesc, valid vsHint targets', () => {
-  const catalog = buildCatalog(DEFAULT_PLUGIN_ROOT);
+  const cleanRoot = mkdtempSync(join(tmpdir(), 'pstack-studio-slop-'));
+  let catalog;
+  try {
+    catalog = buildCatalog(DEFAULT_PLUGIN_ROOT, {
+      userDir: join(cleanRoot, 'user'),
+      geminiConfigDir: join(cleanRoot, 'gemini'),
+    });
+  } finally {
+    rmSync(cleanRoot, { recursive: true, force: true });
+  }
   const pbIds = new Set(catalog.playbooks.map((p) => p.id));
   const skIds = new Set(catalog.skills.map((s) => s.id));
   const nativeIds = new Set(catalog.nativeModifiers.map((n) => n.id));
@@ -260,7 +291,7 @@ test('anti-slop structural gate: zero decorative emojis, concise shortDesc, vali
   assert.equal(emojiRegex.test(metaSource), false, 'metadata-zh.mjs must not contain decorative emojis');
 });
 
-test('all 22 playbooks have valid source-faithful control-flow graphs, SVG rendering, and Mermaid export', () => {
+test('all 23 playbooks have valid source-faithful control-flow graphs, SVG rendering, and Mermaid export', () => {
   const catalog = buildCatalog(DEFAULT_PLUGIN_ROOT);
   const pbIds = new Set(catalog.playbooks.map((p) => p.id));
 
@@ -521,8 +552,8 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
     // 4. Verify merged catalog includes custom playbook, external skills, auto-discovered default skills, and author tags
     const catRes = await fetch(`${info.url}/api/catalog`);
     const cat = await catRes.json();
-    assert.equal(cat.counts.playbooks, 23);
-    assert.equal(cat.counts.skills, 37);
+    assert.equal(cat.counts.playbooks, 24);
+    assert.equal(cat.counts.skills, 39);
     assert.equal(cat.counts.principles, 25);
 
     const builtinSk = cat.skills.find((s) => s.id === 'interrogate');

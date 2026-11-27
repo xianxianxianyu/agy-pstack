@@ -459,39 +459,79 @@ function recordExplicitSkillUsage(skillId) {
     .catch(() => {});
 }
 
-function groupSkillsByAuthor(skillsList) {
+function groupSkillsByLine(skillsList) {
+  const configuredLines =
+    Array.isArray(state.catalog?.skillLines) && state.catalog.skillLines.length > 0
+      ? state.catalog.skillLines
+      : [
+          { id: 'verify', titleZh: '验证与校验', titleEn: 'Verification' },
+          { id: 'understand', titleZh: '理解与表达', titleEn: 'Understand & Prompt' },
+          { id: 'retro', titleZh: '复盘与沉淀', titleEn: 'Recap & Retro' },
+          { id: 'engineering', titleZh: '工程实践与入口', titleEn: 'Practice & Entry' },
+        ];
+  const lineOrder = new Map(configuredLines.map((l, i) => [l.id, i]));
+  const lineMeta = new Map(configuredLines.map((l) => [l.id, l]));
+
   const buckets = new Map();
   for (const sk of skillsList) {
-    const key = sk.author || 'other';
+    const hasConfiguredLine = Boolean(sk.line && lineMeta.has(sk.line));
+    let key;
+    let label;
+    let isBuiltinLine = false;
+
+    if (hasConfiguredLine) {
+      const lm = lineMeta.get(sk.line);
+      key = lm.id;
+      label = lm.titleZh;
+      isBuiltinLine = true;
+    } else if (sk.origin === 'builtin') {
+      const lm = lineMeta.get('engineering') || { id: 'engineering', titleZh: '工程实践与入口' };
+      key = lm.id;
+      label = lm.titleZh;
+      isBuiltinLine = true;
+    } else {
+      const authorKey = sk.author || 'other';
+      key = `ext:${authorKey}`;
+      label = sk.authorLabel || (authorKey === 'other' ? '扩展技能' : `@${authorKey}`);
+      isBuiltinLine = false;
+    }
+
     if (!buckets.has(key)) {
       buckets.set(key, {
         key,
-        label: sk.authorLabel || (key === 'other' ? 'Other' : `@${key}`),
+        label,
+        isBuiltinLine,
         items: [],
       });
     }
     buckets.get(key).items.push(sk);
   }
+
   const groups = [];
   for (const g of buckets.values()) {
     g.items = sortByUsageDesc(g.items, (s) => getSkillUsage(s.id));
     g.totalUsage = g.items.reduce((sum, s) => sum + getSkillUsage(s.id), 0);
     groups.push(g);
   }
+
   groups.sort((a, b) => {
-    if (a.key === 'poteto') return -1;
-    if (b.key === 'poteto') return 1;
-    if (a.key === 'other') return 1;
-    if (b.key === 'other') return -1;
+    if (a.isBuiltinLine && b.isBuiltinLine) {
+      return (lineOrder.get(a.key) ?? 99) - (lineOrder.get(b.key) ?? 99);
+    }
+    if (a.isBuiltinLine !== b.isBuiltinLine) {
+      return a.isBuiltinLine ? -1 : 1;
+    }
+    if (a.key === 'ext:other') return 1;
+    if (b.key === 'ext:other') return -1;
     if (b.totalUsage !== a.totalUsage) return b.totalUsage - a.totalUsage;
     return a.key.localeCompare(b.key);
   });
+
   return groups;
 }
 
 function renderSkillPillWithHoverCard(s) {
   const on = state.addonSkills.includes(s.id);
-  const cnt = getSkillUsage(s.id);
   const originBadge =
     s.origin === 'workspace'
       ? '<span class="origin-tag">项目默认</span>'
@@ -511,7 +551,7 @@ function renderSkillPillWithHoverCard(s) {
         data-action="toggle-addon-skill"
         data-id="${esc(s.id)}"
       >
-        <span>${esc(s.slash)} ${esc(s.titleZh)}</span>${cnt > 0 ? `<span class="pill-count">${cnt}</span>` : ''}
+        <span>${esc(s.slash)} ${esc(s.titleZh)}</span>
       </button>
       <div class="skill-hover-card" role="tooltip">
         <div class="shc-top">
@@ -604,17 +644,13 @@ function renderSidebarList() {
   el.innerHTML = renderGroupedPlaybooks();
 }
 
-function renderNavRow({ navKey, action, id, title, enLabel, active, usageCount = 0, origin = '' }) {
+function renderNavRow({ navKey, action, id, title, enLabel, active, origin = '' }) {
   const originTag =
     origin === 'custom'
       ? '<span class="origin-tag">自定义</span>'
       : origin === 'external'
         ? '<span class="origin-tag">外部</span>'
         : '';
-  const usageTag =
-    usageCount > 0
-      ? `<span class="usage-badge" title="已使用 ${usageCount} 次">${usageCount}次</span>`
-      : '';
   return `
     <button
       type="button"
@@ -629,7 +665,6 @@ function renderNavRow({ navKey, action, id, title, enLabel, active, usageCount =
           ${originTag}
         </span>
         <span class="nav-item-meta">
-          ${usageTag}
           <span class="nav-item-en">${esc(enLabel)}</span>
         </span>
       </div>
@@ -654,7 +689,6 @@ function renderGroupedPlaybooks() {
       id: pb.id,
       title: pb.titleZh,
       enLabel: pb.titleEn || pb.id,
-      usageCount: getPlaybookUsage(pb.id),
       origin: pb.origin === 'custom' ? 'custom' : '',
       active: isSelected,
     });
@@ -667,7 +701,7 @@ function renderGroupedPlaybooks() {
   const usedIds = new Set(used.map((p) => p.id));
 
   if (used.length > 0) {
-    chunks.push(`<div class="group-heading">高频使用 · 按次数排序</div>`);
+    chunks.push(`<div class="group-heading">高频使用</div>`);
     for (const pb of used) chunks.push(renderPb(pb));
   }
 
@@ -1288,8 +1322,7 @@ function renderCustomizeShelfHtml() {
 
   const renderPrinciplePill = (pr) => {
     const on = state.principles.includes(pr.id);
-    const cnt = getPrincipleUsage(pr.id);
-    return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-principle" data-id="${esc(pr.id)}" title="${esc(pr.titleEn)}：${esc(pr.summary)}"><span>${esc(pr.titleZh)}</span>${cnt > 0 ? `<span class="pill-count">${cnt}</span>` : ''}</button>`;
+    return `<button type="button" class="opt-pill ${on ? 'on' : ''}" data-action="toggle-principle" data-id="${esc(pr.id)}" title="${esc(pr.titleEn)}：${esc(pr.summary)}"><span>${esc(pr.titleZh)}</span></button>`;
   };
 
   return `
@@ -1361,7 +1394,7 @@ function renderCustomizeShelfHtml() {
         }
       </div>
 
-      <!-- Layer 2: Skills (Grouped by Author, Usage-Ranked) -->
+      <!-- Layer 2: Skills (Multi-Line Functional Lanes, Silently Usage-Ranked) -->
       <div class="shelf-layer" data-layer="skills">
         <button type="button" class="shelf-layer-head" data-action="toggle-shelf-layer" data-layer="skills" aria-expanded="${state.layerOpen.skills ? 'true' : 'false'}">
           <span class="shelf-layer-left">
@@ -1376,14 +1409,14 @@ function renderCustomizeShelfHtml() {
           state.layerOpen.skills
             ? `
           <div class="shelf-layer-body">
-            <div class="skill-author-groups">
-              ${groupSkillsByAuthor(shownSkills)
+            <div class="skill-line-groups">
+              ${groupSkillsByLine(shownSkills)
                 .map(
                   (grp, idx) => `
-                <div class="skill-author-block" data-author-group="${esc(grp.key)}">
+                <div class="skill-line-block" data-skill-line="${esc(grp.key)}">
                   <div class="shelf-subgroup-head">
                     <div class="shelf-subgroup-left">
-                      <span class="skill-author-badge ${grp.key === 'poteto' ? 'is-poteto' : ''}">${esc(grp.label)}</span>
+                      <span class="shelf-subgroup-tag ${grp.isBuiltinLine ? 'is-skill-line' : ''}">${esc(grp.label)}</span>
                       <span class="skill-author-count">${grp.items.length}</span>
                     </div>
                     ${
