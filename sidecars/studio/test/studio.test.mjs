@@ -15,7 +15,7 @@ import {
 } from '../shared/markdown-wysiwyg.mjs';
 import { createStandaloneStudioServer } from '../standalone.mjs';
 
-test('buildCatalog discovers all 23 playbooks, 35 workflow skills, 24 principles, and 2 agents with 100% metadata alignment', () => {
+test('buildCatalog discovers all 24 playbooks, 35 workflow skills, 24 principles, and 2 agents with 100% metadata alignment', () => {
   const emptyUserDir = mkdtempSync(join(tmpdir(), 'pstack-studio-clean-'));
   const emptyGeminiDir = join(emptyUserDir, 'gemini-cfg');
   let catalog;
@@ -28,7 +28,7 @@ test('buildCatalog discovers all 23 playbooks, 35 workflow skills, 24 principles
     rmSync(emptyUserDir, { recursive: true, force: true });
   }
 
-  assert.equal(catalog.counts.playbooks, 23);
+  assert.equal(catalog.counts.playbooks, 24);
   assert.equal(catalog.counts.skills, 35);
   assert.equal(catalog.skills.filter((s) => !s.inAnyPlaybook).length, 21);
   assert.equal(catalog.skills.filter((s) => s.inAnyPlaybook).length, 14);
@@ -216,7 +216,7 @@ test('standalone server serves catalog, health, source, and dispatch preview end
     const catRes = await fetch(`${info.url}/api/catalog`);
     assert.equal(catRes.status, 200);
     const catJson = await catRes.json();
-    assert.equal(catJson.counts.playbooks, 23);
+    assert.equal(catJson.counts.playbooks, 24);
 
     for (const assetPath of ['/', '/styles.css', '/app.js', '/shared/prompt-composer.mjs', '/shared/flowchart-svg.mjs', '/shared/markdown-wysiwyg.mjs', '/preload.js']) {
       const assetRes = await fetch(`${info.url}${assetPath}`);
@@ -291,7 +291,7 @@ test('anti-slop structural gate: zero decorative emojis, concise shortDesc, vali
   assert.equal(emojiRegex.test(metaSource), false, 'metadata-zh.mjs must not contain decorative emojis');
 });
 
-test('all 23 playbooks have valid source-faithful control-flow graphs, SVG rendering, and Mermaid export', () => {
+test('all 24 playbooks have valid source-faithful control-flow graphs, SVG rendering, and Mermaid export', () => {
   const catalog = buildCatalog(DEFAULT_PLUGIN_ROOT);
   const pbIds = new Set(catalog.playbooks.map((p) => p.id));
 
@@ -552,7 +552,7 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
     // 4. Verify merged catalog includes custom playbook, external skills, auto-discovered default skills, and author tags
     const catRes = await fetch(`${info.url}/api/catalog`);
     const cat = await catRes.json();
-    assert.equal(cat.counts.playbooks, 24);
+    assert.equal(cat.counts.playbooks, 25);
     assert.equal(cat.counts.skills, 39);
     assert.equal(cat.counts.principles, 25);
 

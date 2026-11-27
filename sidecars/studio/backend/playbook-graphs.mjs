@@ -555,6 +555,27 @@ export const PLAYBOOK_GRAPHS = {
     ],
   },
 
+  'quick-research': {
+    topologyLabel: '两轮极简流水线 · 并行速搜 + 一手核实 → 对比表交付',
+    rows: [
+      [{ id: 'search', type: 'step', label: '1. 并行调用 Parallel + Exa 摸底', sub: '复用 research.py（开源选型顺手并 repos / hn）', mounts: ['research.py'] }],
+      [{ id: 'verify', type: 'step', label: '2. Top 3–5 候选一手核实', sub: '并行 repo 查真实活跃度/README 或 fetch 实测原文', mounts: ['prove-it-works'] }],
+      [{ id: 'synthesize', type: 'step', label: '3. 汇总对比表、避坑点与推荐', sub: '直接聊天输出优劣表格与选型结论，不污染工作区', mounts: ['/unslop'] }],
+      [{ id: 'escalate', type: 'decision', label: '4. 是否存在高风险分歧或需论文级溯源？' }],
+      [
+        { id: 'done', type: 'step', label: '直接结束并交付聊天结论', sub: '覆盖 80% 日常选型与速查' },
+        { id: 'deep', type: 'subroutine', label: '建议升级 · Topic Research', targetPlaybook: 'topic-research' },
+      ],
+    ],
+    edges: [
+      { from: 'search', to: 'verify' },
+      { from: 'verify', to: 'synthesize' },
+      { from: 'synthesize', to: 'escalate' },
+      { from: 'escalate', to: 'done', label: '结论充分' },
+      { from: 'escalate', to: 'deep', label: '需双钻深挖' },
+    ],
+  },
+
   'topic-research': {
     topologyLabel: '双钻双技能状态机 · 第一钻探索定纲 + 第二钻取证成稿',
     rows: [
