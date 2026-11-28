@@ -6,8 +6,8 @@
   "author": {
     "name": "Lauren Tan (adapted for Antigravity)"
   },
-  "homepage": "https://github.com/ahmetdotsh/agy-pstack",
-  "repository": "https://github.com/ahmetdotsh/agy-pstack",
+  "homepage": "https://github.com/xianxianxianyu/agy-pstack",
+  "repository": "https://github.com/xianxianxianyu/agy-pstack",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [
     "/poteto-mode reproduce, root-cause, and fix this bug with runtime evidence",

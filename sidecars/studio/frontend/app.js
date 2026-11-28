@@ -153,9 +153,14 @@ function saveLocalUsage(usage) {
 
 const initialUiPrefs = loadLocalUiPrefs();
 
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 const state = {
   catalog: null,
   health: null,
+  updateInfo: null,
+  updateChecking: false,
+  updateApplying: false,
   workspaceUris: [],
   resolvedProjectId: '',
   themeMode: initialUiPrefs.themeMode, // 'auto' | 'light' | 'dark'
@@ -568,6 +573,7 @@ function mountShell() {
       </div>
 
       <div class="topbar-right">
+        <span id="topbar-update-slot"></span>
         <button id="settings-btn" type="button" class="quiet-icon-btn" data-action="toggle-settings" title="打开插件设置">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.45" aria-hidden="true">
             <circle cx="8" cy="8" r="2.3"></circle>
@@ -613,9 +619,45 @@ function syncSettingsVisibility() {
   if (lbl) lbl.textContent = state.settingsOpen ? '返回工作台' : '设置';
 }
 
+function formatCheckedTime(isoStr) {
+  if (!isoStr) return '尚未检查';
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return '尚未检查';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function renderTopbarUpdateSlot() {
+  const slot = document.getElementById('topbar-update-slot');
+  if (!slot) return;
+  const info = state.updateInfo;
+  if (!info || !info.hasUpdate || info.dismissed) {
+    slot.innerHTML = '';
+    return;
+  }
+  const badgeText =
+    info.aheadBy > 0
+      ? `有更新 (+${info.aheadBy})`
+      : info.mode === 'version' && info.remoteVersion
+        ? `有更新 v${info.remoteVersion}`
+        : '有更新';
+  slot.innerHTML = `
+    <button
+      type="button"
+      class="topbar-update-pill"
+      data-action="open-update-modal"
+      title="检测到插件新版本，点击查看详情并一键更新"
+    >
+      <span class="topbar-update-dot" aria-hidden="true"></span>
+      <span>${esc(badgeText)}</span>
+    </button>
+  `;
+}
+
 function renderAll() {
   applyUiPreferences();
   syncSettingsVisibility();
+  renderTopbarUpdateSlot();
   renderSidebarList();
   renderStageRegion();
   if (state.settingsOpen) {
@@ -1590,6 +1632,117 @@ function renderSettingsRegion() {
   bindSettingsInputs();
 }
 
+function renderUpdateCommitListHtml(commits = []) {
+  if (!Array.isArray(commits) || commits.length === 0) return '';
+  return `
+    <ul class="update-commit-list">
+      ${commits
+        .map(
+          (c) => `
+        <li class="update-commit-item">
+          <code class="update-commit-sha">${esc(c.shortSha)}</code>
+          <span class="update-commit-msg">${esc(c.message)}</span>
+        </li>
+      `
+        )
+        .join('')}
+    </ul>
+  `;
+}
+
+function renderSettingsUpdateCard() {
+  const info = state.updateInfo;
+  const pluginVer = info?.localVersion || state.catalog?.plugin?.version || '1.3.0';
+  const localRef = info?.localShortSha ? `v${pluginVer} · ${info.localShortSha}` : `v${pluginVer}`;
+  const branchText = info?.branch ? ` (${info.branch})` : '';
+  const checkedText = info?.checkedAt ? `上次检查：${formatCheckedTime(info.checkedAt)}` : '尚未检查';
+
+  let statusClass = 'is-muted';
+  let statusText = '等待检查';
+  if (state.updateChecking) {
+    statusClass = 'is-muted';
+    statusText = '正在检查远程更新…';
+  } else if (info) {
+    if (info.status === 'update-available') {
+      statusClass = 'is-update';
+      statusText =
+        info.aheadBy > 0
+          ? `发现 ${info.aheadBy} 条新提交（最新 ${info.remoteShortSha || info.remoteVersion}）`
+          : `发现新版本（${info.remoteShortSha || info.remoteVersion}）`;
+    } else if (info.status === 'diverged') {
+      statusClass = 'is-warn';
+      statusText = '本地与远程分支已分叉，建议手动同步';
+    } else if (info.status === 'local-ahead') {
+      statusClass = 'is-ok';
+      statusText = '本地提交领先于远程';
+    } else if (info.status === 'up-to-date') {
+      statusClass = 'is-ok';
+      statusText = '已是最新版本';
+    } else if (info.status === 'error') {
+      statusClass = 'is-warn';
+      statusText = `检查失败：${info.error || '无法连接远程仓库'}`;
+    }
+  }
+
+  return `
+    <section class="settings-card">
+      <div class="settings-card-head">
+        <div>
+          <h2 class="settings-card-title">插件更新（Updates）</h2>
+          <p class="settings-card-sub">每 6 小时静默检查一次远程仓库更新（本地缓存不阻塞启动），也可随时手动触发检查并执行安全快进更新。</p>
+        </div>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          data-action="check-update-manual"
+          ${state.updateChecking || state.updateApplying ? 'disabled' : ''}
+        >${state.updateChecking ? '检查中…' : '立即检查更新'}</button>
+      </div>
+
+      <div class="update-status-row">
+        <span class="update-badge ${statusClass}">${esc(statusText)}</span>
+        <span class="update-meta-text">当前：<code>${esc(localRef + branchText)}</code> · ${esc(checkedText)}</span>
+      </div>
+
+      ${
+        info?.hasUpdate && info.isDirty
+          ? `
+        <div class="update-warn-box">
+          检测到插件目录存在 ${info.dirtyFilesCount} 处未提交改动，为保护本地修改已禁用自动拉取；请先清理或手动执行更新命令。
+        </div>
+      `
+          : ''
+      }
+
+      ${info?.hasUpdate ? renderUpdateCommitListHtml(info.commits) : ''}
+
+      ${
+        info?.hasUpdate
+          ? `
+        <div class="update-actions-row">
+          ${
+            info.canAutoUpdate
+              ? `<button type="button" class="btn btn-primary" data-action="apply-update" ${state.updateApplying ? 'disabled' : ''}>${state.updateApplying ? '正在拉取更新…' : '一键安全更新'}</button>`
+              : ''
+          }
+          ${
+            info.manualCommand
+              ? `<button type="button" class="btn btn-ghost" data-action="copy-path" data-path="${esc(info.manualCommand)}">复制更新命令</button>`
+              : ''
+          }
+          ${
+            info.compareUrl
+              ? `<a class="btn btn-ghost" href="${esc(info.compareUrl)}" target="_blank" rel="noopener noreferrer">查看 GitHub 变更 ↗</a>`
+              : ''
+          }
+        </div>
+      `
+          : ''
+      }
+    </section>
+  `;
+}
+
 function renderSettingsGeneralTab() {
   const themeChoices = [
     { id: 'auto', label: '跟随宿主 (自动)' },
@@ -1688,6 +1841,8 @@ function renderSettingsGeneralTab() {
         </div>
       </div>
     </section>
+
+    ${renderSettingsUpdateCard()}
 
     <section class="settings-card">
       <div>
@@ -2294,6 +2449,117 @@ async function handleDeleteUserItem(kind, id) {
   }
 }
 
+async function checkPluginUpdate({ force = false, silent = false } = {}) {
+  if (state.updateChecking) return;
+  state.updateChecking = true;
+  if (state.settingsOpen) renderSettingsRegion();
+  try {
+    const res = await apiFetch('/api/update/check', {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    state.updateInfo = data;
+    renderTopbarUpdateSlot();
+    if (state.settingsOpen) renderSettingsRegion();
+    if (state.modal?.kind === 'update') renderModalRegion();
+
+    if (!silent) {
+      if (data.status === 'update-available') {
+        const countStr = data.aheadBy > 0 ? `（新增 ${data.aheadBy} 条提交）` : '';
+        showToast(`发现插件更新${countStr}`, 3200);
+      } else if (data.status === 'up-to-date') {
+        showToast('当前插件已是最新版本');
+      } else if (data.status === 'local-ahead') {
+        showToast('本地提交领先于远程仓库，无需更新');
+      } else if (data.status === 'diverged') {
+        showToast('本地与远程分支存在分叉，请手动同步', 3600);
+      } else if (data.status === 'error') {
+        showToast(`检查更新失败：${data.error || '网络异常'}`, 3600);
+      }
+    }
+  } catch (err) {
+    if (!silent) {
+      showToast(`检查更新失败：${err.message}`, 3600);
+    }
+  } finally {
+    state.updateChecking = false;
+    if (state.settingsOpen) renderSettingsRegion();
+    if (state.modal?.kind === 'update') renderModalRegion();
+  }
+}
+
+async function handleDismissPluginUpdate() {
+  const info = state.updateInfo;
+  const target = info?.remoteSha || info?.remoteVersion || '';
+  if (info) {
+    state.updateInfo = { ...info, dismissed: true, dismissedTarget: target };
+  }
+  if (state.modal?.kind === 'update') {
+    state.modal = null;
+  }
+  renderTopbarUpdateSlot();
+  renderModalRegion();
+  try {
+    await apiFetch('/api/update/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    });
+    showToast('已忽略当前版本提醒，下次有新发布时再通知');
+  } catch {
+    // Non-fatal
+  }
+}
+
+async function handleApplyPluginUpdate() {
+  if (state.updateApplying) return;
+  state.updateApplying = true;
+  if (state.settingsOpen) renderSettingsRegion();
+  if (state.modal?.kind === 'update') renderModalRegion();
+  try {
+    const res = await apiFetch('/api/update/apply', {
+      method: 'POST',
+      body: JSON.stringify({ workspaceUris: state.workspaceUris }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '更新失败');
+
+    if (data.updateInfo) {
+      state.updateInfo = data.updateInfo;
+    }
+    if (data.catalog) {
+      state.catalog = data.catalog;
+    }
+    if (state.modal?.kind === 'update') {
+      state.modal = null;
+    }
+    renderAll();
+
+    if (data.requiresRestart) {
+      showToast(`已更新至 ${data.afterShortSha}，正在重载 pstack Studio…`, 3200);
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } else if (data.requiresReload) {
+      showToast(`已更新至 ${data.afterShortSha}，正在刷新界面…`, 2400);
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 900);
+    } else if (data.updated) {
+      showToast(`插件已安全更新至 ${data.afterShortSha}，目录已刷新`);
+    } else {
+      showToast('当前已是最新版本');
+    }
+  } catch (err) {
+    showToast(`更新未完成：${err.message}`, 4500);
+  } finally {
+    state.updateApplying = false;
+    if (state.settingsOpen) renderSettingsRegion();
+    if (state.modal?.kind === 'update') renderModalRegion();
+  }
+}
+
 async function handleResetUsage() {
   state.usage = { presets: {}, playbooks: {}, skills: {}, principles: {} };
   saveLocalUsage(state.usage);
@@ -2315,6 +2581,70 @@ function renderModalRegion() {
   if (!el) return;
   if (!state.modal) {
     el.innerHTML = '';
+    return;
+  }
+  if (state.modal.kind === 'update') {
+    const info = state.updateInfo || {};
+    const targetLabel = info.remoteShortSha || info.remoteVersion || '最新版本';
+    const localLabel = info.localShortSha || info.localVersion || '当前版本';
+    const dismissTarget = info.remoteSha || info.remoteVersion || '';
+    el.innerHTML = `
+      <div class="modal-backdrop" data-action="close-modal-backdrop">
+        <div class="modal-sheet update-modal-sheet" role="dialog" aria-modal="true" aria-label="插件更新详情">
+          <div class="modal-header">
+            <span class="modal-path">检测到插件更新：${esc(localLabel)} → ${esc(targetLabel)}</span>
+            <button type="button" class="quiet-icon-btn" data-action="close-modal">关闭</button>
+          </div>
+          <div class="update-modal-body">
+            <p class="settings-card-sub" style="margin:0;">
+              ${
+                info.aheadBy > 0
+                  ? `远程仓库有 ${info.aheadBy} 条新提交可同步至本地插件目录。`
+                  : '远程仓库有新版本可同步至本地插件目录。'
+              }
+            </p>
+            ${
+              info.isDirty
+                ? `
+              <div class="update-warn-box">
+                插件目录存在 ${info.dirtyFilesCount} 处未提交改动，为避免覆盖已暂停自动拉取。请复制下方命令手动更新。
+              </div>
+            `
+                : info.status === 'diverged'
+                  ? `
+              <div class="update-warn-box">
+                本地分支与远程分支存在分叉，无法安全快进合并（--ff-only），请在终端手动处理。
+              </div>
+            `
+                  : ''
+            }
+            ${renderUpdateCommitListHtml(info.commits)}
+            <div class="update-actions-row">
+              ${
+                info.canAutoUpdate
+                  ? `<button type="button" class="btn btn-primary" data-action="apply-update" ${state.updateApplying ? 'disabled' : ''}>${state.updateApplying ? '正在拉取更新…' : '一键安全更新'}</button>`
+                  : ''
+              }
+              ${
+                info.manualCommand
+                  ? `<button type="button" class="btn btn-secondary" data-action="copy-path" data-path="${esc(info.manualCommand)}">复制更新命令</button>`
+                  : ''
+              }
+              ${
+                info.compareUrl
+                  ? `<a class="btn btn-ghost" href="${esc(info.compareUrl)}" target="_blank" rel="noopener noreferrer">查看变更 ↗</a>`
+                  : ''
+              }
+              ${
+                dismissTarget
+                  ? `<button type="button" class="btn btn-ghost" data-action="dismiss-update">忽略此版本</button>`
+                  : ''
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
     return;
   }
   if (state.modal.kind === 'flowchart') {
@@ -2960,6 +3290,23 @@ function handleDelegatedClick(e) {
       void openSourceModal(target.dataset.path);
       break;
     }
+    case 'open-update-modal': {
+      state.modal = { kind: 'update' };
+      renderModalRegion();
+      break;
+    }
+    case 'check-update-manual': {
+      void checkPluginUpdate({ force: true, silent: false });
+      break;
+    }
+    case 'apply-update': {
+      void handleApplyPluginUpdate();
+      break;
+    }
+    case 'dismiss-update': {
+      void handleDismissPluginUpdate();
+      break;
+    }
     case 'close-modal': {
       state.modal = null;
       renderModalRegion();
@@ -3113,6 +3460,10 @@ async function init() {
   renderAll();
 
   void resolveProjectId();
+  void checkPluginUpdate({ force: false, silent: true });
+  window.setInterval(() => {
+    void checkPluginUpdate({ force: false, silent: true });
+  }, UPDATE_CHECK_INTERVAL_MS);
 
   if (window.sidecar?.getWorkspaceUris) {
     await refreshHealth(state.workspaceUris);

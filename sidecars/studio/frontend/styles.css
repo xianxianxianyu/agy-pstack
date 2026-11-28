@@ -2732,6 +2732,184 @@ a.plaque-chip:hover {
   background: color-mix(in srgb, #dc2626 10%, transparent);
 }
 
+/* Plugin Update Indicator & Settings Card */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-update-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.topbar-update-pill:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: #10b981;
+}
+
+:root[data-theme="dark"] .topbar-update-pill {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(110, 231, 183, 0.35);
+}
+
+:root[data-theme="dark"] .topbar-update-pill:hover {
+  background: rgba(16, 185, 129, 0.28);
+  border-color: #34d399;
+}
+
+.topbar-update-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.22);
+}
+
+.update-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.update-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.update-badge.is-ok {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.26);
+}
+
+.update-badge.is-update {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+}
+
+.update-badge.is-warn {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.update-badge.is-muted {
+  color: var(--ps-muted);
+  background: var(--ps-subtle);
+  border: 1px solid var(--ps-line);
+}
+
+:root[data-theme="dark"] .update-badge.is-ok {
+  color: #6ee7b7;
+}
+
+:root[data-theme="dark"] .update-badge.is-update {
+  color: #93c5fd;
+}
+
+:root[data-theme="dark"] .update-badge.is-warn {
+  color: #fcd34d;
+}
+
+.update-meta-text {
+  font-size: 0.8rem;
+  color: var(--ps-muted);
+}
+
+.update-meta-text code {
+  font-family: var(--ps-mono);
+  font-size: 0.78rem;
+  color: var(--ps-fg-2);
+}
+
+.update-warn-box {
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--ps-fg-2);
+  font-size: 0.83rem;
+  line-height: 1.48;
+}
+
+.update-commit-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--ps-subtle);
+  border: 1px solid var(--ps-line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.update-commit-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.update-commit-sha {
+  font-family: var(--ps-mono);
+  font-size: 0.76rem;
+  color: var(--ps-accent);
+  flex-shrink: 0;
+}
+
+.update-commit-msg {
+  color: var(--ps-fg-2);
+  word-break: break-word;
+}
+
+.update-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.update-actions-row a.btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.update-modal-sheet {
+  width: min(560px, 100%);
+}
+
+.update-modal-body {
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* Responsive Narrow Aux-Pane (< 680px) */
 @media (max-width: 679px) {
   .topbar {

@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { buildCatalog, DEFAULT_PLUGIN_ROOT, readCatalogSourceFile } from '../backend/catalog-builder.mjs';
 import { AGENT_META, PLAYBOOK_META, PRINCIPLE_META, SKILL_META } from '../backend/metadata-zh.mjs';
+import {
+  applyPluginUpdate,
+  checkForPluginUpdate,
+  compareSemver,
+  dismissPluginUpdate,
+  parseGithubRepo,
+} from '../backend/plugin-updater.mjs';
 import { checkWorkspaceHealth } from '../backend/workspace-health.mjs';
 import { composePrompt } from '../shared/prompt-composer.mjs';
 import { layoutFlowchart, renderFlowchartSvg, toMermaidCode } from '../shared/flowchart-svg.mjs';
@@ -697,6 +705,158 @@ test('user-space settings, external skill folder mounting, custom playbook/princ
     assert.deepEqual(resetJson.usage.skills, {});
   } finally {
     await srv.stop();
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('plugin updater checks git remote with 6h cache, supports manual force/dismiss, guards dirty tree, and applies ff-only pull', async () => {
+  assert.deepEqual(parseGithubRepo('https://github.com/xianxianxianyu/agy-pstack.git'), {
+    owner: 'xianxianxianyu',
+    repo: 'agy-pstack',
+    htmlUrl: 'https://github.com/xianxianxianyu/agy-pstack',
+  });
+  assert.deepEqual(parseGithubRepo('git@github.com:xianxianxianyu/agy-pstack.git'), {
+    owner: 'xianxianxianyu',
+    repo: 'agy-pstack',
+    htmlUrl: 'https://github.com/xianxianxianyu/agy-pstack',
+  });
+  assert.equal(compareSemver('1.4.0', '1.3.0'), 1);
+  assert.equal(compareSemver('1.3.0', '1.3.0'), 0);
+  assert.equal(compareSemver('1.2.9', '1.3.0'), -1);
+
+  const tempRoot = mkdtempSync(join(tmpdir(), 'pstack-updater-test-'));
+  const bareOrigin = join(tempRoot, 'origin.git');
+  const upstreamWork = join(tempRoot, 'upstream');
+  const installedPlugin = join(tempRoot, 'installed-plugin');
+  const userDir = join(tempRoot, 'user-studio');
+
+  const git = (args, cwd) =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'tester',
+        GIT_AUTHOR_EMAIL: 'tester@example.com',
+        GIT_COMMITTER_NAME: 'tester',
+        GIT_COMMITTER_EMAIL: 'tester@example.com',
+      },
+    }).trim();
+
+  try {
+    mkdirSync(bareOrigin, { recursive: true });
+    git(['init', '--bare', '-b', 'main'], bareOrigin);
+
+    mkdirSync(upstreamWork, { recursive: true });
+    git(['init', '-b', 'main'], upstreamWork);
+    writeFileSync(
+      join(upstreamWork, 'plugin.json'),
+      JSON.stringify({ name: 'pstack', version: '1.3.0' }, null, 2) + '\n'
+    );
+    writeFileSync(join(upstreamWork, 'README.md'), '# pstack v1\n');
+    git(['add', '.'], upstreamWork);
+    git(['commit', '-m', 'init v1'], upstreamWork);
+    git(['remote', 'add', 'origin', bareOrigin], upstreamWork);
+    git(['push', '-u', 'origin', 'main'], upstreamWork);
+
+    git(['clone', bareOrigin, installedPlugin], tempRoot);
+
+    // 1. Initial check -> up-to-date, second check hits 6h cache
+    const first = await checkForPluginUpdate({ pluginRoot: installedPlugin, userDir, force: false });
+    assert.equal(first.ok, true);
+    assert.equal(first.status, 'up-to-date');
+    assert.equal(first.hasUpdate, false);
+    assert.equal(first.fromCache, false);
+    assert.equal(first.intervalHours, 6);
+
+    const cached = await checkForPluginUpdate({ pluginRoot: installedPlugin, userDir, force: false });
+    assert.equal(cached.fromCache, true);
+    assert.equal(cached.hasUpdate, false);
+
+    // 2. Push a new commit upstream -> cached check stays cached; force check detects update
+    writeFileSync(
+      join(upstreamWork, 'plugin.json'),
+      JSON.stringify({ name: 'pstack', version: '1.4.0' }, null, 2) + '\n'
+    );
+    writeFileSync(join(upstreamWork, 'README.md'), '# pstack v2\n');
+    git(['add', '.'], upstreamWork);
+    git(['commit', '-m', 'feat: release v2'], upstreamWork);
+    git(['push', 'origin', 'main'], upstreamWork);
+    const remoteV2Sha = git(['rev-parse', 'HEAD'], upstreamWork);
+
+    const stillCached = await checkForPluginUpdate({ pluginRoot: installedPlugin, userDir, force: false });
+    assert.equal(stillCached.fromCache, true);
+    assert.equal(stillCached.hasUpdate, false);
+
+    const detected = await checkForPluginUpdate({ pluginRoot: installedPlugin, userDir, force: true });
+    assert.equal(detected.ok, true);
+    assert.equal(detected.status, 'update-available');
+    assert.equal(detected.hasUpdate, true);
+    assert.equal(detected.remoteSha, remoteV2Sha);
+    assert.equal(detected.canAutoUpdate, true);
+    assert.equal(detected.dismissed, false);
+
+    // 3. Dismiss v2 -> dismissed: true; new v3 commit clears dismissed automatically
+    dismissPluginUpdate({ target: remoteV2Sha, userDir });
+    const afterDismiss = await checkForPluginUpdate({ pluginRoot: installedPlugin, userDir, force: false });
+    assert.equal(afterDismiss.hasUpdate, true);
+    assert.equal(afterDismiss.dismissed, true);
+
+    writeFileSync(join(upstreamWork, 'README.md'), '# pstack v3\n');
+    git(['add', '.'], upstreamWork);
+    git(['commit', '-m', 'feat: release v3'], upstreamWork);
+    git(['push', 'origin', 'main'], upstreamWork);
+    const remoteV3Sha = git(['rev-parse', 'HEAD'], upstreamWork);
+
+    const detectedV3 = await checkForPluginUpdate({ pluginRoot: installedPlugin, userDir, force: true });
+    assert.equal(detectedV3.hasUpdate, true);
+    assert.equal(detectedV3.remoteSha, remoteV3Sha);
+    assert.equal(detectedV3.dismissed, false);
+
+    // 4. Dirty working tree blocks auto-update safely
+    writeFileSync(join(installedPlugin, 'README.md'), '# local uncommitted edit\n');
+    const dirtyCheck = await checkForPluginUpdate({ pluginRoot: installedPlugin, userDir, force: false });
+    assert.equal(dirtyCheck.isDirty, true);
+    assert.equal(dirtyCheck.canAutoUpdate, false);
+    await assert.rejects(() => applyPluginUpdate({ pluginRoot: installedPlugin, userDir }), /未提交改动/);
+
+    // 5. Restore clean tree and apply real fast-forward update via standalone server HTTP API
+    git(['checkout', '--', 'README.md'], installedPlugin);
+    const srv = createStandaloneStudioServer({
+      port: 0,
+      pluginRoot: installedPlugin,
+      userDir,
+      geminiConfigDir: join(tempRoot, 'gemini'),
+    });
+    const info = await srv.start();
+    try {
+      const checkRes = await fetch(`${info.url}/api/update/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      });
+      assert.equal(checkRes.status, 200);
+      const checkJson = await checkRes.json();
+      assert.equal(checkJson.hasUpdate, true);
+      assert.equal(checkJson.canAutoUpdate, true);
+
+      const applyRes = await fetch(`${info.url}/api/update/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      assert.equal(applyRes.status, 200);
+      const applyJson = await applyRes.json();
+      assert.equal(applyJson.ok, true);
+      assert.equal(applyJson.updated, true);
+      assert.equal(applyJson.afterSha, remoteV3Sha);
+      assert.equal(applyJson.updateInfo.hasUpdate, false);
+      assert.equal(applyJson.updateInfo.status, 'up-to-date');
+      assert.match(readFileSync(join(installedPlugin, 'README.md'), 'utf-8'), /# pstack v3/);
+    } finally {
+      await srv.stop();
+    }
+  } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
 });

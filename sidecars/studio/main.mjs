@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Response, SidecarApp } from 'sidecar_sdk';
 import { DEFAULT_PLUGIN_ROOT, readCatalogSourceFile } from './backend/catalog-builder.mjs';
 import { buildClassicAppBundle } from './backend/bundle-frontend.mjs';
+import { applyPluginUpdate, checkForPluginUpdate, dismissPluginUpdate } from './backend/plugin-updater.mjs';
 import { checkWorkspaceHealth } from './backend/workspace-health.mjs';
 import {
   addSkillDir,
@@ -183,6 +184,31 @@ app.api('/api/usage/reset', () => {
   const usage = resetUsageStats();
   if (cachedCatalogData) cachedCatalogData.usage = usage;
   return { ok: true, usage };
+}, 'POST');
+
+app.api('/api/update/check', (data) => {
+  return checkForPluginUpdate({
+    pluginRoot: DEFAULT_PLUGIN_ROOT,
+    force: Boolean(data?.force),
+  });
+}, 'POST');
+
+app.api('/api/update/dismiss', (data) => {
+  return dismissPluginUpdate({ target: data?.target || '' });
+}, 'POST');
+
+app.api('/api/update/apply', async (data) => {
+  const result = await applyPluginUpdate({ pluginRoot: DEFAULT_PLUGIN_ROOT });
+  const catalog = await getLiveCatalog({
+    forceReload: true,
+    workspaceUris: Array.isArray(data?.workspaceUris) ? data.workspaceUris : [],
+  });
+  if (result.requiresRestart) {
+    setTimeout(() => {
+      process.exit(0);
+    }, 600);
+  }
+  return { ...result, catalog };
 }, 'POST');
 
 app.api('/api/new-conversation', (data) => {

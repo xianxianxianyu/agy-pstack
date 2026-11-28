@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCatalog, DEFAULT_PLUGIN_ROOT, readCatalogSourceFile } from './backend/catalog-builder.mjs';
 import { buildClassicAppBundle } from './backend/bundle-frontend.mjs';
+import { applyPluginUpdate, checkForPluginUpdate, dismissPluginUpdate } from './backend/plugin-updater.mjs';
 import { checkWorkspaceHealth } from './backend/workspace-health.mjs';
 import {
   addSkillDir,
@@ -249,6 +250,28 @@ export function createStandaloneStudioServer({
           if (url.pathname === '/api/usage/reset') {
             const usage = resetUsageStats(userDir);
             return sendJson(200, { ok: true, usage });
+          }
+          if (url.pathname === '/api/update/check') {
+            checkForPluginUpdate({
+              pluginRoot,
+              userDir,
+              force: Boolean(data?.force),
+            })
+              .then((payload) => sendJson(200, payload))
+              .catch((err) => sendJson(500, { error: err.message }));
+            return;
+          }
+          if (url.pathname === '/api/update/dismiss') {
+            return sendJson(200, dismissPluginUpdate({ target: data?.target || '', userDir }));
+          }
+          if (url.pathname === '/api/update/apply') {
+            applyPluginUpdate({ pluginRoot, userDir })
+              .then((result) => {
+                const catalog = buildCatalog(pluginRoot, opts);
+                sendJson(200, { ...result, catalog });
+              })
+              .catch((err) => sendJson(500, { error: err.message }));
+            return;
           }
           if (url.pathname === '/_sidecar/send-message') {
             const entry = {
