@@ -100,6 +100,12 @@ const app = new SidecarApp();
 
 app.page('/', () => serveDiskAsset(join(FRONTEND_DIR, 'index.html'), 'text/html; charset=utf-8'));
 app.page('/styles.css', () => serveDiskAsset(join(FRONTEND_DIR, 'styles.css'), 'text/css; charset=utf-8'));
+app.page('/avatars/poteto.svg', () =>
+  serveDiskAsset(join(FRONTEND_DIR, 'avatars', 'poteto.svg'), 'image/svg+xml; charset=utf-8')
+);
+app.page('/avatars/xianxianxianyu.svg', () =>
+  serveDiskAsset(join(FRONTEND_DIR, 'avatars', 'xianxianxianyu.svg'), 'image/svg+xml; charset=utf-8')
+);
 app.page('/app.js', () => new Response(buildClassicAppBundle(__dirname), {
   contentType: 'application/javascript; charset=utf-8',
   status: 200,

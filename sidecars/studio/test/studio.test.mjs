@@ -94,8 +94,10 @@ test('buildCatalog discovers all 24 playbooks, 35 workflow skills, 24 principles
     assert.equal(pb.author, 'xianxianxianyu');
     assert.equal(pb.authorLabel, '@xianxianxianyu');
     assert.equal(pb.attribution.author, 'xianxianxianyu');
+    assert.equal(pb.attribution.kickerZh, '原创作者');
+    assert.equal(pb.attribution.avatarUrl, '/avatars/xianxianxianyu.svg');
     assert.equal(pb.attribution.theme, 'custom');
-    assert.equal(pb.attribution.pack, 'Research Flow');
+    assert.equal(pb.attribution.quote, undefined);
     assert.equal(pb.attribution.repoUrl, 'https://github.com/xianxianxianyu/agy-pstack');
   }
   for (const skId of ['topic-research-plan', 'topic-research']) {
@@ -104,11 +106,15 @@ test('buildCatalog discovers all 24 playbooks, 35 workflow skills, 24 principles
     assert.equal(sk.author, 'xianxianxianyu');
     assert.equal(sk.authorLabel, '@xianxianxianyu');
     assert.equal(sk.attribution.author, 'xianxianxianyu');
+    assert.equal(sk.attribution.avatarUrl, '/avatars/xianxianxianyu.svg');
     assert.equal(sk.attribution.theme, 'custom');
   }
   const potetoPb = catalog.playbooks.find((p) => p.id === 'bug-fix');
   assert.equal(potetoPb.author, 'poteto');
   assert.equal(potetoPb.attribution.author, 'poteto');
+  assert.equal(potetoPb.attribution.kickerZh, '原创作者');
+  assert.equal(potetoPb.attribution.avatarUrl, '/avatars/poteto.svg');
+  assert.equal(potetoPb.attribution.quote, undefined);
   assert.equal(potetoPb.attribution.theme, 'poteto');
 
   // Every recipe references existing playbooks, skills, principles, and constraints
@@ -242,7 +248,7 @@ test('standalone server serves catalog, health, source, and dispatch preview end
     const catJson = await catRes.json();
     assert.equal(catJson.counts.playbooks, 24);
 
-    for (const assetPath of ['/', '/styles.css', '/app.js', '/shared/prompt-composer.mjs', '/shared/flowchart-svg.mjs', '/shared/markdown-wysiwyg.mjs', '/preload.js']) {
+    for (const assetPath of ['/', '/styles.css', '/app.js', '/avatars/poteto.svg', '/avatars/xianxianxianyu.svg', '/shared/prompt-composer.mjs', '/shared/flowchart-svg.mjs', '/shared/markdown-wysiwyg.mjs', '/preload.js']) {
       const assetRes = await fetch(`${info.url}${assetPath}`);
       assert.equal(assetRes.status, 200, `Expected HTTP 200 for ${assetPath}`);
       const text = await assetRes.text();

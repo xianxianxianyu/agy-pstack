@@ -227,12 +227,12 @@ const PRINCIPLE_GROUP_LABELS = {
 
 export const POTETO_ATTRIBUTION = {
   theme: 'poteto',
+  kickerZh: '原创作者',
   author: 'poteto',
   authorName: 'Lauren Tan',
+  avatarUrl: '/avatars/poteto.svg',
   pack: 'Cursor pstack',
-  roleZh: '原版方法论作者',
-  quote: 'If you want to go fast, go deep first.',
-  quoteZh: '欲速则先深耕——目标不是写更多代码，而是写更少、更高质量、经得起验证的代码。',
+  roleZh: '原创作者',
   repoLabel: 'cursor/plugins · pstack',
   repoUrl: 'https://github.com/cursor/plugins/tree/main/pstack',
   portBy: 'ahmetdotsh',
@@ -245,10 +245,9 @@ export const XIANXIANXIANYU_ATTRIBUTION = {
   kickerZh: '原创作者',
   author: 'xianxianxianyu',
   authorName: 'xianxianxianyu',
+  avatarUrl: '/avatars/xianxianxianyu.svg',
   pack: 'Research Flow',
-  roleZh: '原创调研流程作者',
-  quote: 'Diverge to map the terrain, converge on primary sources, audit every claim.',
-  quoteZh: '先发散摸清版图，再收束回一手原文取证与双轨审校，让每条结论都经得起溯源。',
+  roleZh: '原创作者',
   repoLabel: 'xianxianxianyu/agy-pstack',
   repoUrl: 'https://github.com/xianxianxianyu/agy-pstack',
 };
@@ -283,16 +282,22 @@ function buildCustomAttribution(attributes = {}) {
   const author = String(attributes.author || 'custom').trim().replace(/^@/, '');
   const authorName = String(attributes.authorName || author || '本地作者').trim();
   const pack = String(attributes.pack || 'Custom Flow').trim();
-  const quote = String(attributes.quote || '').trim();
   const repoUrl = String(attributes.authorUrl || attributes.repoUrl || '').trim();
+  const explicitAvatar = String(attributes.avatarUrl || attributes.avatar || '').trim();
+  const isGithubHandle =
+    Boolean(author) &&
+    author !== 'custom' &&
+    author !== 'other' &&
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(author);
+  const avatarUrl = explicitAvatar || (isGithubHandle ? `https://github.com/${author}.png?size=96` : '');
   return {
     theme: 'custom',
+    kickerZh: '原创作者',
     author,
     authorName,
+    avatarUrl,
     pack,
-    roleZh: '自定义流程作者',
-    quote,
-    quoteZh: quote ? '' : '存放在本地独立用户目录，持续跟随上游内置技能演进且零合并冲突。',
+    roleZh: '原创作者',
     repoLabel: repoUrl || '~/.gemini/config/pstack-studio/playbooks',
     repoUrl,
     portBy: 'poteto',

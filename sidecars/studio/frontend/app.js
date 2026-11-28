@@ -151,14 +151,6 @@ function saveLocalUsage(usage) {
   }
 }
 
-function loadPlaqueCollapsed() {
-  try {
-    return window.localStorage?.getItem('pstack_studio_plaque_collapsed') === '1';
-  } catch {
-    return false;
-  }
-}
-
 const initialUiPrefs = loadLocalUiPrefs();
 
 const state = {
@@ -169,7 +161,6 @@ const state = {
   themeMode: initialUiPrefs.themeMode, // 'auto' | 'light' | 'dark'
   fontFamily: initialUiPrefs.fontFamily, // 'system' | 'sans-cn' | 'mono' | 'serif'
   fontSize: initialUiPrefs.fontSize, // 12..16
-  plaqueCollapsed: loadPlaqueCollapsed(),
   settingsOpen: false,
   settingsTab: 'general', // 'general' | 'playbooks' | 'skills' | 'principles'
   settingsDraft: {
@@ -757,10 +748,7 @@ function renderStageRegion() {
       el.innerHTML =
         renderPrincipleStage(pr) +
         renderComposerBlock() +
-        renderAuthorPlaque(pr.attribution || fallbackAttr, {
-          collapsed: state.plaqueCollapsed,
-          contextLabel: pr.titleZh,
-        });
+        renderAuthorPlaque(pr.attribution || fallbackAttr);
       bindComposerInputs();
       return;
     }
@@ -771,104 +759,63 @@ function renderStageRegion() {
     el.innerHTML =
       renderPlaybookStage(pb) +
       renderComposerBlock() +
-      renderAuthorPlaque(pb?.attribution || fallbackAttr, {
-        collapsed: state.plaqueCollapsed,
-        contextLabel: pb ? `${pb.titleZh} · ${pb.titleEn}` : '',
-      });
+      renderAuthorPlaque(pb?.attribution || fallbackAttr);
   } else {
     const sk = findSkill(state.primary.id) || state.catalog.skills[0];
     el.innerHTML =
       renderSkillStage(sk) +
       renderComposerBlock() +
-      renderAuthorPlaque(sk?.attribution || fallbackAttr, {
-        collapsed: state.plaqueCollapsed,
-        contextLabel: sk ? `${sk.slash} · ${sk.titleZh}` : '',
-      });
+      renderAuthorPlaque(sk?.attribution || fallbackAttr);
   }
 
   bindComposerInputs();
 }
 
 /**
- * Reusable collapsible Developer Tribute Plaque (Colophon).
- * Renders an iridescent, dignified credit card honoring the flow's original
- * author (e.g. Lauren Tan @poteto for Cursor pstack, or custom flow authors).
+ * Compact single-line Author Attribution Plaque.
+ * Displays the author's circular avatar, "原创作者" label, and author name/handle.
  */
-function renderAuthorPlaque(attribution, { collapsed = false, allowCollapse = true } = {}) {
+function renderAuthorPlaque(attribution) {
   const attr = attribution || state.catalog?.plugin?.defaultAttribution;
   if (!attr) return '';
 
   const isCustom = attr.theme === 'custom';
   const themeClass = isCustom ? 'plaque-custom' : 'plaque-poteto';
-  const collapsedClass = allowCollapse && collapsed ? 'plaque-collapsed' : '';
-  const kickerText = attr.kickerZh || (isCustom ? 'Flow 作者' : '致敬原作者');
-  const handleText = `@${attr.author || 'poteto'}`;
+  const kickerText = attr.kickerZh || '原创作者';
+  const authorSlug = String(attr.author || 'poteto').trim();
+  const handleText = `@${authorSlug}`;
+  const displayName = String(attr.authorName || authorSlug).trim();
   const showAuthorName =
     Boolean(attr.authorName) &&
-    String(attr.authorName).trim().toLowerCase() !== String(attr.author || '').trim().toLowerCase();
+    displayName.toLowerCase() !== authorSlug.toLowerCase();
+  const fallbackInitial = (displayName || authorSlug || 'A').slice(0, 1).toUpperCase();
+  const avatarUrl = String(attr.avatarUrl || '').trim();
 
-  const emblemSvg = isCustom
-    ? `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-         <path d="M10 3l6.5 3.7L10 10.4 3.5 6.7 10 3z" stroke-linejoin="round"></path>
-         <path d="M3.5 11l6.5 3.7 6.5-3.7" stroke-linecap="round" stroke-linejoin="round"></path>
-         <path d="M3.5 14.5l6.5 3.5 6.5-3.5" stroke-linecap="round" stroke-linejoin="round"></path>
-       </svg>`
-    : `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-         <path d="M10 2.6l7 3.9-7 3.9-7-3.9 7-3.9z" fill="currentColor" fill-opacity="0.22" stroke-linejoin="round"></path>
-         <path d="M3 10.3l7 3.9 7-3.9" stroke-linecap="round" stroke-linejoin="round"></path>
-         <path d="M3 14l7 3.9 7-3.9" stroke-linecap="round" stroke-linejoin="round"></path>
-       </svg>`;
-
-  const toggleBtnHtml = allowCollapse
-    ? `<button type="button" class="plaque-toggle-pill" data-action="toggle-plaque" aria-expanded="${collapsed ? 'false' : 'true'}">${collapsed ? '展开 ▾' : '收起 ▴'}</button>`
-    : '';
+  const avatarHtml = avatarUrl
+    ? `<span class="plaque-avatar">
+         <img class="plaque-avatar-img" src="${esc(avatarUrl)}" alt="${esc(displayName)}" loading="lazy" decoding="async" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='inline-flex';" />
+         <span class="plaque-avatar-fallback" style="display:none;" aria-hidden="true">${esc(fallbackInitial)}</span>
+       </span>`
+    : `<span class="plaque-avatar">
+         <span class="plaque-avatar-fallback" aria-hidden="true">${esc(fallbackInitial)}</span>
+       </span>`;
 
   const handleBtnHtml = attr.repoUrl
     ? `<a class="plaque-handle" href="${esc(attr.repoUrl)}" target="_blank" rel="noopener noreferrer" title="打开原版出处：${esc(attr.repoUrl)}">${esc(handleText)} ↗</a>`
     : `<span class="plaque-handle">${esc(handleText)}</span>`;
 
-  const headerAttrs = allowCollapse
-    ? `class="plaque-header" data-action="toggle-plaque" aria-expanded="${collapsed ? 'false' : 'true'}"`
-    : `class="plaque-header" style="cursor:default;"`;
-
   return `
-    <section class="tribute-plaque ${themeClass} ${collapsedClass}" aria-label="开发者致敬铭牌">
-      <div ${headerAttrs}>
+    <section class="tribute-plaque ${themeClass}" aria-label="原创作者信息">
+      <div class="plaque-header">
         <div class="plaque-header-left">
-          <span class="plaque-emblem">${emblemSvg}</span>
+          ${avatarHtml}
           <div class="plaque-identity">
             <span class="plaque-kicker">${esc(kickerText)}</span>
-            ${showAuthorName ? `<span class="plaque-name">${esc(attr.authorName)}</span>` : ''}
+            ${showAuthorName ? `<span class="plaque-name">${esc(displayName)}</span>` : ''}
             ${handleBtnHtml}
-            <span class="plaque-pack-tag">${esc(attr.pack || 'Cursor pstack')}</span>
-            ${
-              allowCollapse && collapsed && attr.quote
-                ? `<span class="plaque-mini-quote">“${esc(attr.quote)}”</span>`
-                : ''
-            }
           </div>
         </div>
-        ${toggleBtnHtml}
       </div>
-
-      ${
-        !allowCollapse || !collapsed
-          ? `
-        <div class="plaque-body">
-          ${
-            attr.quote || attr.quoteZh
-              ? `
-            <div class="plaque-quote-box">
-              ${attr.quote ? `<div class="plaque-quote-en">“${esc(attr.quote)}”</div>` : ''}
-              ${attr.quoteZh ? `<div class="plaque-quote-zh">${esc(attr.quoteZh)}</div>` : ''}
-            </div>
-          `
-              : ''
-          }
-        </div>
-      `
-          : ''
-      }
     </section>
   `;
 }
@@ -1744,10 +1691,10 @@ function renderSettingsGeneralTab() {
 
     <section class="settings-card">
       <div>
-        <h2 class="settings-card-title">致敬与出处（Credits）</h2>
-        <p class="settings-card-sub">自定义流程可在 Frontmatter 中填写 <code>author</code>、<code>authorName</code>、<code>pack</code>、<code>quote</code>，右侧工作台会自动复用同款多彩铭牌展示你的署名。</p>
+        <h2 class="settings-card-title">原创作者（Credits）</h2>
+        <p class="settings-card-sub">自定义流程可在 Frontmatter 中填写 <code>author</code>、<code>authorName</code>、<code>avatarUrl</code>，右侧工作台会自动展示对应头像与作者署名。</p>
       </div>
-      ${renderAuthorPlaque(state.catalog?.plugin?.defaultAttribution, { allowCollapse: false })}
+      ${renderAuthorPlaque(state.catalog?.plugin?.defaultAttribution)}
     </section>
   `;
 }
@@ -2726,17 +2673,6 @@ function handleDelegatedClick(e) {
     }
     case 'copy-path': {
       void copyTextRaw(target.dataset.path || '', '已复制链接/路径');
-      break;
-    }
-    case 'toggle-plaque': {
-      if (e.target.closest('a')) break;
-      state.plaqueCollapsed = !state.plaqueCollapsed;
-      try {
-        window.localStorage?.setItem('pstack_studio_plaque_collapsed', state.plaqueCollapsed ? '1' : '0');
-      } catch {
-        // Ignore restricted storage
-      }
-      renderStageRegion();
       break;
     }
     case 'open-item-from-settings': {

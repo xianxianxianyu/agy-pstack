@@ -1977,59 +1977,61 @@ button.mount-pill:hover {
   width: 100%;
   border: none;
   background: transparent;
-  padding: 12px 16px;
+  padding: 10px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   text-align: left;
-  cursor: pointer;
-}
-
-.tribute-plaque.plaque-collapsed .plaque-header {
-  padding: 9px 14px;
+  cursor: default;
 }
 
 .plaque-header-left {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   min-width: 0;
   flex: 1;
 }
 
-.plaque-emblem {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+.plaque-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  padding: 1.5px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
+  overflow: hidden;
   background: linear-gradient(135deg, #6366f1 0%, #a855f7 48%, #ec4899 100%);
-  box-shadow: 0 4px 12px -2px rgba(168, 85, 247, 0.45);
+  box-shadow: 0 3px 10px -2px rgba(168, 85, 247, 0.42);
 }
 
-.plaque-custom .plaque-emblem {
+.plaque-custom .plaque-avatar {
   background: linear-gradient(135deg, #10b981 0%, #06b6d4 52%, #3b82f6 100%);
-  box-shadow: 0 4px 12px -2px rgba(6, 182, 212, 0.45);
+  box-shadow: 0 3px 10px -2px rgba(6, 182, 212, 0.42);
 }
 
-.tribute-plaque.plaque-collapsed .plaque-emblem {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+.plaque-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  background: var(--ps-card);
 }
 
-.plaque-emblem svg {
-  width: 18px;
-  height: 18px;
-}
-
-.tribute-plaque.plaque-collapsed .plaque-emblem svg {
-  width: 13px;
-  height: 13px;
+.plaque-avatar-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #ffffff;
 }
 
 .plaque-identity {
@@ -2138,96 +2140,6 @@ a.plaque-handle:hover {
 :root[data-theme="dark"] .plaque-custom a.plaque-handle:hover {
   background: rgba(52, 211, 153, 0.32);
   border-color: #6ee7b7;
-}
-
-.plaque-pack-tag {
-  font-size: 0.76rem;
-  font-weight: 650;
-  padding: 1px 8px;
-  border-radius: 999px;
-  color: #be185d;
-  background: linear-gradient(135deg, rgba(236, 72, 153, 0.14), rgba(245, 158, 11, 0.14));
-  border: 1px solid rgba(236, 72, 153, 0.28);
-}
-
-:root[data-theme="dark"] .plaque-pack-tag {
-  color: #fbcfe8;
-  background: linear-gradient(135deg, rgba(236, 72, 153, 0.22), rgba(245, 158, 11, 0.2));
-  border-color: rgba(244, 114, 182, 0.36);
-}
-
-.plaque-custom .plaque-pack-tag {
-  color: #0369a1;
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.14), rgba(59, 130, 246, 0.14));
-  border-color: rgba(6, 182, 212, 0.28);
-}
-
-:root[data-theme="dark"] .plaque-custom .plaque-pack-tag {
-  color: #bae6fd;
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.22), rgba(59, 130, 246, 0.2));
-  border-color: rgba(103, 232, 249, 0.34);
-}
-
-.plaque-mini-quote {
-  font-size: 0.8rem;
-  font-style: italic;
-  color: var(--ps-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 280px;
-}
-
-.plaque-toggle-pill {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--ps-fg-2);
-  background: color-mix(in srgb, var(--ps-card) 75%, transparent);
-  border: 1px solid var(--ps-border);
-  border-radius: 999px;
-  padding: 3px 10px;
-  flex-shrink: 0;
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.plaque-header:hover .plaque-toggle-pill {
-  background: var(--ps-card);
-  color: var(--ps-fg);
-}
-
-.plaque-body {
-  padding: 0 16px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 11px;
-}
-
-.plaque-quote-box {
-  position: relative;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--ps-card) 72%, transparent);
-  border: 1px solid color-mix(in srgb, var(--ps-fg) 8%, transparent);
-  border-left: 3px solid #a855f7;
-}
-
-.plaque-custom .plaque-quote-box {
-  border-left-color: #06b6d4;
-}
-
-.plaque-quote-en {
-  font-size: 0.94rem;
-  font-weight: 600;
-  font-style: italic;
-  color: var(--ps-fg);
-  line-height: 1.45;
-}
-
-.plaque-quote-zh {
-  margin-top: 3px;
-  font-size: 0.84rem;
-  color: var(--ps-fg-2);
-  line-height: 1.5;
 }
 
 .plaque-meta-row {

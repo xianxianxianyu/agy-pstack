@@ -133,6 +133,12 @@ export function createStandaloneStudioServer({
     if (req.method === 'GET') {
       if (url.pathname === '/') return sendFile(join(FRONTEND_DIR, 'index.html'), 'text/html; charset=utf-8');
       if (url.pathname === '/styles.css') return sendFile(join(FRONTEND_DIR, 'styles.css'), 'text/css; charset=utf-8');
+      if (url.pathname === '/avatars/poteto.svg') {
+        return sendFile(join(FRONTEND_DIR, 'avatars', 'poteto.svg'), 'image/svg+xml; charset=utf-8');
+      }
+      if (url.pathname === '/avatars/xianxianxianyu.svg') {
+        return sendFile(join(FRONTEND_DIR, 'avatars', 'xianxianxianyu.svg'), 'image/svg+xml; charset=utf-8');
+      }
       if (url.pathname === '/app.js') {
         res.writeHead(200, {
           'Content-Type': 'application/javascript; charset=utf-8',
