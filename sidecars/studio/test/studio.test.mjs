@@ -87,6 +87,30 @@ test('buildCatalog discovers all 24 playbooks, 35 workflow skills, 24 principles
     }
   }
 
+  // Verify built-in research playbooks & dual skills credit @xianxianxianyu rather than @poteto
+  for (const pbId of ['quick-research', 'topic-research']) {
+    const pb = catalog.playbooks.find((p) => p.id === pbId);
+    assert.ok(pb, `Missing playbook ${pbId}`);
+    assert.equal(pb.author, 'xianxianxianyu');
+    assert.equal(pb.authorLabel, '@xianxianxianyu');
+    assert.equal(pb.attribution.author, 'xianxianxianyu');
+    assert.equal(pb.attribution.theme, 'custom');
+    assert.equal(pb.attribution.pack, 'Research Flow');
+    assert.equal(pb.attribution.repoUrl, 'https://github.com/xianxianxianyu/agy-pstack');
+  }
+  for (const skId of ['topic-research-plan', 'topic-research']) {
+    const sk = catalog.skills.find((s) => s.id === skId);
+    assert.ok(sk, `Missing skill ${skId}`);
+    assert.equal(sk.author, 'xianxianxianyu');
+    assert.equal(sk.authorLabel, '@xianxianxianyu');
+    assert.equal(sk.attribution.author, 'xianxianxianyu');
+    assert.equal(sk.attribution.theme, 'custom');
+  }
+  const potetoPb = catalog.playbooks.find((p) => p.id === 'bug-fix');
+  assert.equal(potetoPb.author, 'poteto');
+  assert.equal(potetoPb.attribution.author, 'poteto');
+  assert.equal(potetoPb.attribution.theme, 'poteto');
+
   // Every recipe references existing playbooks, skills, principles, and constraints
   const constraintIds = new Set(catalog.constraints.map((c) => c.id));
   const nativeIds = new Set(catalog.nativeModifiers.map((n) => n.id));

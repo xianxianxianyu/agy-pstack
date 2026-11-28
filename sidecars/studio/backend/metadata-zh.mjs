@@ -812,6 +812,7 @@ export const PLAYBOOK_META = {
   'quick-research': {
     titleZh: '轻量联网速查',
     titleEn: 'Quick Research',
+    author: 'xianxianxianyu',
     scenario: 'understand',
     intensity: 'light',
     intensityLabel: '并行速查',
@@ -832,6 +833,7 @@ export const PLAYBOOK_META = {
   'topic-research': {
     titleZh: '深度主题调研',
     titleEn: 'Topic Research',
+    author: 'xianxianxianyu',
     scenario: 'understand',
     intensity: 'deep',
     intensityLabel: '双钻闭环',
@@ -1232,6 +1234,7 @@ export const SKILL_META = {
   'topic-research-plan': {
     titleZh: '深度调研 · 第一钻：探索与定纲',
     titleEn: 'Topic Research Plan',
+    author: 'xianxianxianyu',
     shortDesc: '自适应锚定、多视角轻探与三桶 Judge 定纲',
     scenario: 'understand',
     line: 'understand',
@@ -1243,6 +1246,7 @@ export const SKILL_META = {
   'topic-research': {
     titleZh: '深度调研 · 第二钻：取证与成稿',
     titleEn: 'Topic Research',
+    author: 'xianxianxianyu',
     shortDesc: '单文档精读清洗、反证补查与高可读报告交付',
     scenario: 'understand',
     line: 'understand',

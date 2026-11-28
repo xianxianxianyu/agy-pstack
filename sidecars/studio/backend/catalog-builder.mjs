@@ -240,6 +240,45 @@ export const POTETO_ATTRIBUTION = {
   portUrl: 'https://github.com/ahmetdotsh/agy-pstack',
 };
 
+export const XIANXIANXIANYU_ATTRIBUTION = {
+  theme: 'custom',
+  kickerZh: '原创作者',
+  author: 'xianxianxianyu',
+  authorName: 'xianxianxianyu',
+  pack: 'Research Flow',
+  roleZh: '原创调研流程作者',
+  quote: 'Diverge to map the terrain, converge on primary sources, audit every claim.',
+  quoteZh: '先发散摸清版图，再收束回一手原文取证与双轨审校，让每条结论都经得起溯源。',
+  repoLabel: 'xianxianxianyu/agy-pstack',
+  repoUrl: 'https://github.com/xianxianxianyu/agy-pstack',
+};
+
+function resolveBuiltinAuthor(attributes = {}, meta = {}) {
+  const raw = String(meta.author || attributes.author || 'poteto').trim().replace(/^@/, '');
+  const clean = raw.toLowerCase();
+  if (!clean || clean === 'poteto') {
+    return {
+      author: 'poteto',
+      authorLabel: '@poteto · Cursor pstack',
+      attribution: POTETO_ATTRIBUTION,
+    };
+  }
+  if (clean === 'xianxianxianyu') {
+    return {
+      author: 'xianxianxianyu',
+      authorLabel: '@xianxianxianyu',
+      attribution: meta.attribution
+        ? { ...XIANXIANXIANYU_ATTRIBUTION, ...meta.attribution }
+        : XIANXIANXIANYU_ATTRIBUTION,
+    };
+  }
+  return {
+    author: raw,
+    authorLabel: `@${raw}`,
+    attribution: meta.attribution || buildCustomAttribution({ ...attributes, author: raw }),
+  };
+}
+
 function buildCustomAttribution(attributes = {}) {
   const author = String(attributes.author || 'custom').trim().replace(/^@/, '');
   const authorName = String(attributes.authorName || author || '本地作者').trim();
@@ -426,6 +465,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
     const raw = readFileSync(absPath, 'utf-8');
     const { attributes, body } = parseFrontmatter(raw);
     const meta = SKILL_META[id] || {};
+    const { author, authorLabel, attribution } = resolveBuiltinAuthor(attributes, meta);
     return {
       id,
       slash: `/${id}`,
@@ -444,9 +484,9 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       relPath,
       sourceFilePath: absPath,
       origin: 'builtin',
-      author: 'poteto',
-      authorLabel: '@poteto · Cursor pstack',
-      attribution: POTETO_ATTRIBUTION,
+      author,
+      authorLabel,
+      attribution,
       lineCount: raw.split('\n').length,
       previewExcerpt: body.split('\n').slice(0, 12).join('\n'),
     };
@@ -579,6 +619,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
     const raw = readFileSync(absPath, 'utf-8');
     const { attributes } = parseFrontmatter(raw);
     const meta = PRINCIPLE_META[id] || {};
+    const { author, authorLabel, attribution } = resolveBuiltinAuthor(attributes, meta);
     return {
       id,
       shortSlug,
@@ -592,7 +633,9 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       relPath,
       sourceFilePath: absPath,
       origin: 'builtin',
-      attribution: POTETO_ATTRIBUTION,
+      author,
+      authorLabel,
+      attribution,
     };
   });
 
@@ -670,8 +713,10 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
     const relPath = `skills/poteto-mode/playbooks/${filename}`;
     const absPath = join(pluginRoot, relPath);
     const raw = readFileSync(absPath, 'utf-8');
-    const parsed = parsePlaybookMarkdown(id, raw, allWorkflowSkillIds, allPrincipleIds);
+    const { attributes, body } = parseFrontmatter(raw);
+    const parsed = parsePlaybookMarkdown(id, body || raw, allWorkflowSkillIds, allPrincipleIds);
     const meta = PLAYBOOK_META[id] || {};
+    const { author, authorLabel, attribution } = resolveBuiltinAuthor(attributes, meta);
 
     const steps =
       Array.isArray(meta.stepsZh) && meta.stepsZh.length > 0
@@ -722,7 +767,9 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       relPath,
       sourceFilePath: absPath,
       origin: 'builtin',
-      attribution: POTETO_ATTRIBUTION,
+      author,
+      authorLabel,
+      attribution,
     };
   });
 
@@ -779,6 +826,7 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
       const validScenarios = SCENARIOS.map((s) => s.id);
       const scenario = validScenarios.includes(attributes.scenario) ? attributes.scenario : 'build';
 
+      const customAttribution = buildCustomAttribution(attributes);
       customPlaybooks.push({
         id,
         titleZh,
@@ -802,7 +850,9 @@ export function buildCatalog(pluginRoot = DEFAULT_PLUGIN_ROOT, options = {}) {
         relPath: `user:playbooks/${filename}`,
         sourceFilePath: absPath,
         origin: 'custom',
-        attribution: buildCustomAttribution(attributes),
+        author: customAttribution.author,
+        authorLabel: `@${customAttribution.author}`,
+        attribution: customAttribution,
       });
     }
   }

@@ -711,9 +711,28 @@ function renderGroupedPlaybooks() {
     for (const pb of unusedCustom) chunks.push(renderPb(pb));
   }
 
+  const unusedAuthoredBuiltin = cat.playbooks.filter(
+    (p) => p.origin !== 'custom' && p.author && p.author !== 'poteto' && !usedIds.has(p.id)
+  );
+  if (unusedAuthoredBuiltin.length > 0) {
+    const byAuthor = new Map();
+    for (const pb of unusedAuthoredBuiltin) {
+      if (!byAuthor.has(pb.author)) byAuthor.set(pb.author, []);
+      byAuthor.get(pb.author).push(pb);
+    }
+    for (const [authorKey, items] of byAuthor.entries()) {
+      chunks.push(`<div class="group-heading">原创流程 · @${esc(authorKey)}</div>`);
+      for (const pb of items) chunks.push(renderPb(pb));
+    }
+  }
+
   for (const scId of order) {
     const items = cat.playbooks.filter(
-      (p) => p.origin !== 'custom' && p.scenario === scId && !usedIds.has(p.id)
+      (p) =>
+        p.origin !== 'custom' &&
+        (!p.author || p.author === 'poteto') &&
+        p.scenario === scId &&
+        !usedIds.has(p.id)
     );
     if (items.length === 0) continue;
     chunks.push(`<div class="group-heading">${esc(findScenarioTitle(scId))}</div>`);
@@ -782,8 +801,11 @@ function renderAuthorPlaque(attribution, { collapsed = false, allowCollapse = tr
   const isCustom = attr.theme === 'custom';
   const themeClass = isCustom ? 'plaque-custom' : 'plaque-poteto';
   const collapsedClass = allowCollapse && collapsed ? 'plaque-collapsed' : '';
-  const kickerText = isCustom ? 'Flow 作者' : '致敬原作者';
+  const kickerText = attr.kickerZh || (isCustom ? 'Flow 作者' : '致敬原作者');
   const handleText = `@${attr.author || 'poteto'}`;
+  const showAuthorName =
+    Boolean(attr.authorName) &&
+    String(attr.authorName).trim().toLowerCase() !== String(attr.author || '').trim().toLowerCase();
 
   const emblemSvg = isCustom
     ? `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
@@ -816,7 +838,7 @@ function renderAuthorPlaque(attribution, { collapsed = false, allowCollapse = tr
           <span class="plaque-emblem">${emblemSvg}</span>
           <div class="plaque-identity">
             <span class="plaque-kicker">${esc(kickerText)}</span>
-            <span class="plaque-name">${esc(attr.authorName || attr.author)}</span>
+            ${showAuthorName ? `<span class="plaque-name">${esc(attr.authorName)}</span>` : ''}
             ${handleBtnHtml}
             <span class="plaque-pack-tag">${esc(attr.pack || 'Cursor pstack')}</span>
             ${
@@ -899,7 +921,7 @@ function renderPlaybookStage(pb) {
 
     <section class="stage-header">
       <div class="stage-kicker-row">
-        <span class="stage-kicker">Playbook 流程 · ${esc(scTitle)} · ${esc(pb.intensityLabel)}</span>
+        <span class="stage-kicker">Playbook 流程${pb.author && pb.author !== 'poteto' ? ` · @${esc(pb.author)}` : ''} · ${esc(scTitle)} · ${esc(pb.intensityLabel)}</span>
         <button type="button" class="text-link" data-action="open-source" data-path="${esc(pb.relPath)}">查看原文</button>
       </div>
       <div class="stage-title-row">
